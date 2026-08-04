@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f3f1eb" />
+    <title>T3 Watcher — Draft</title>
+    <meta name="description" content="A quiet view of the T3 threads that still need attention." />
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">T3 WATCHER <span class="draft-badge">DRAFT</span></p>
+          <h1>Unsettled threads</h1>
+        </div>
+        <div class="connection" id="connection" data-state="connecting">
+          <span class="connection-dot" aria-hidden="true"></span>
+          <span id="connection-label">Connecting</span>
+        </div>
+      </header>
+
+      <section class="summary" aria-labelledby="summary-title">
+        <div>
+          <p class="summary-label" id="summary-title">In view</p>
+          <p class="summary-count"><span id="thread-count">—</span><span id="thread-noun"> threads</span></p>
+        </div>
+        <p class="summary-note" id="summary-note">Finding the work that is still moving.</p>
+      </section>
+
+      <div class="stale-banner" id="stale-banner" hidden>
+        <strong>Showing the last known state.</strong>
+        <span id="stale-detail">The watcher cannot reach T3 right now.</span>
+      </div>
+
+      <div class="groups" id="groups" aria-live="polite"></div>
+
+      <section class="empty" id="empty" hidden>
+        <div class="empty-mark" aria-hidden="true">✓</div>
+        <h2>Nothing unsettled</h2>
+        <p>Every visible thread has settled. Enjoy the quiet.</p>
+      </section>
+
+      <footer>
+        <span id="watcher-name">mintbox</span>
+        <span aria-hidden="true">·</span>
+        <span id="last-updated">Waiting for first update</span>
+      </footer>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,78 @@
+import type { T3ShellSnapshot } from "./types.ts";
+
+const now = new Date();
+const before = (minutes: number) => new Date(now.getTime() - minutes * 60_000).toISOString();
+
+export const DEMO_SHELL: T3ShellSnapshot = {
+  snapshotSequence: 42,
+  updatedAt: now.toISOString(),
+  projects: [
+    { id: "project-kase", title: "Kase" },
+    { id: "project-infra", title: "Infrastructure" },
+  ],
+  threads: [
+    {
+      id: "thread-waiting",
+      projectId: "project-kase",
+      title: "Review the authentication migration",
+      latestTurn: {
+        turnId: "turn-waiting",
+        state: "running",
+        requestedAt: before(18),
+        startedAt: before(17),
+        completedAt: null,
+      },
+      session: { status: "running", updatedAt: before(2) },
+      updatedAt: before(2),
+      archivedAt: null,
+      settledOverride: null,
+      settledAt: null,
+      latestUserMessageAt: before(18),
+      hasPendingApprovals: true,
+      hasPendingUserInput: false,
+      hasActionableProposedPlan: false,
+    },
+    {
+      id: "thread-running",
+      projectId: "project-infra",
+      title: "Make preview reconnect after sleep",
+      latestTurn: {
+        turnId: "turn-running",
+        state: "running",
+        requestedAt: before(12),
+        startedAt: before(11),
+        completedAt: null,
+      },
+      session: { status: "running", updatedAt: before(1) },
+      updatedAt: before(1),
+      archivedAt: null,
+      settledOverride: null,
+      settledAt: null,
+      latestUserMessageAt: before(12),
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      hasActionableProposedPlan: false,
+    },
+    {
+      id: "thread-completed",
+      projectId: "project-kase",
+      title: "Clean up the deployment notes",
+      latestTurn: {
+        turnId: "turn-completed",
+        state: "completed",
+        requestedAt: before(35),
+        startedAt: before(34),
+        completedAt: before(5),
+      },
+      session: { status: "ready", updatedAt: before(5) },
+      updatedAt: before(5),
+      archivedAt: null,
+      settledOverride: "active",
+      settledAt: null,
+      latestUserMessageAt: before(35),
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      hasActionableProposedPlan: false,
+    },
+  ],
+};
