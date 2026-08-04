@@ -9,6 +9,7 @@ function thread(overrides: Partial<T3ThreadShell> = {}): T3ThreadShell {
     id: "thread-1",
     projectId: "project-1",
     title: "Test thread",
+    interactionMode: "default",
     latestTurn: {
       turnId: "turn-1",
       state: "completed",
@@ -30,12 +31,14 @@ function thread(overrides: Partial<T3ThreadShell> = {}): T3ThreadShell {
 }
 
 describe("deriveStatus", () => {
-  test("prioritizes waiting over a running session", () => {
+  test("keeps approval and input distinct and prioritizes them over running", () => {
     const value = thread({
       hasPendingApprovals: true,
+      hasPendingUserInput: true,
       session: { status: "running", updatedAt: "2026-08-04T11:00:00.000Z" },
     });
-    expect(deriveStatus(value, NOW)).toBe("waiting");
+    expect(deriveStatus(value, NOW)).toBe("approval");
+    expect(deriveStatus(thread({ hasPendingUserInput: true }), NOW)).toBe("input");
   });
 
   test("prioritizes errors over completed turns", () => {
@@ -43,13 +46,55 @@ describe("deriveStatus", () => {
     expect(deriveStatus(value, NOW)).toBe("failed");
   });
 
-  test("shows actionable plans as waiting", () => {
-    expect(deriveStatus(thread({ hasActionableProposedPlan: true }), NOW)).toBe("waiting");
+  test("only shows a settled plan-mode proposal as plan ready", () => {
+    expect(
+      deriveStatus(
+        thread({ interactionMode: "plan", hasActionableProposedPlan: true }),
+        NOW,
+      ),
+    ).toBe("plan_ready");
+    expect(deriveStatus(thread({ hasActionableProposedPlan: true }), NOW)).toBe("finished");
+  });
+
+  test("recovers completion when teardown leaves the turn interrupted", () => {
+    expect(
+      deriveStatus(
+        thread({
+          session: { status: "stopped", updatedAt: "2026-08-04T10:10:00.000Z" },
+          latestTurn: { ...thread().latestTurn!, state: "interrupted" },
+        }),
+        NOW,
+      ),
+    ).toBe("finished");
+  });
+
+  test("treats ready and idle sessions as finished without a materialized turn", () => {
+    expect(deriveStatus(thread({ latestTurn: null }), NOW)).toBe("finished");
+    expect(
+      deriveStatus(
+        thread({ latestTurn: null, session: { status: "idle", updatedAt: "2026-08-04T10:10:00.000Z" } }),
+        NOW,
+      ),
+    ).toBe("finished");
+  });
+
+  test("maps genuinely interrupted or stopped sessions to ready, not attention", () => {
+    for (const status of ["interrupted", "stopped"] as const) {
+      expect(
+        deriveStatus(
+          thread({
+            session: { status, updatedAt: "2026-08-04T10:10:00.000Z" },
+            latestTurn: { ...thread().latestTurn!, state: "interrupted", completedAt: null },
+          }),
+          NOW,
+        ),
+      ).toBe("ready");
+    }
   });
 });
 
 describe("isEffectivelySettled", () => {
-  test("never settles running or waiting work", () => {
+  test("never settles running work or work awaiting input", () => {
     const running = thread({ session: { status: "running", updatedAt: "2026-08-04T11:00:00.000Z" } });
     const waiting = thread({ hasPendingUserInput: true, settledOverride: "settled" });
     expect(isEffectivelySettled(running, { nowMs: NOW, autoSettleAfterDays: 0 })).toBe(false);

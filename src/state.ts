@@ -10,12 +10,14 @@ const DAY_MS = 24 * 60 * 60 * 1_000;
 const QUEUED_TURN_START_GRACE_MS = 2 * 60 * 1_000;
 
 const STATUS_ORDER: Record<WatcherStatus, number> = {
-  waiting: 0,
-  failed: 1,
-  interrupted: 2,
-  running: 3,
-  completed: 4,
-  active: 5,
+  approval: 0,
+  input: 1,
+  plan_ready: 2,
+  failed: 3,
+  starting: 4,
+  running: 5,
+  finished: 6,
+  ready: 7,
 };
 
 function parsed(value: string | null | undefined): number | null {
@@ -76,33 +78,37 @@ export function isEffectivelySettled(
 }
 
 export function deriveStatus(shell: T3ThreadShell, nowMs: number): WatcherStatus {
-  if (
-    shell.hasPendingApprovals ||
-    shell.hasPendingUserInput ||
-    shell.hasActionableProposedPlan
-  ) {
-    return "waiting";
-  }
+  if (shell.hasPendingApprovals) return "approval";
+  if (shell.hasPendingUserInput) return "input";
   if (shell.session?.status === "error" || shell.latestTurn?.state === "error") {
     return "failed";
   }
+  if (shell.session?.status === "starting") return "starting";
   if (
-    shell.session?.status === "interrupted" ||
-    shell.session?.status === "stopped" ||
-    shell.latestTurn?.state === "interrupted"
-  ) {
-    return "interrupted";
-  }
-  if (
-    shell.session?.status === "starting" ||
     shell.session?.status === "running" ||
     shell.latestTurn?.state === "running" ||
     hasQueuedTurnStart(shell, nowMs)
   ) {
     return "running";
   }
-  if (shell.latestTurn?.state === "completed") return "completed";
-  return "active";
+  const latestTurnSettled =
+    shell.latestTurn?.startedAt != null &&
+    shell.latestTurn.completedAt != null;
+  if (
+    shell.interactionMode === "plan" &&
+    shell.hasActionableProposedPlan &&
+    latestTurnSettled
+  ) {
+    return "plan_ready";
+  }
+  if (shell.latestTurn?.state === "completed") return "finished";
+  if (shell.latestTurn?.state === "interrupted" && shell.latestTurn.completedAt !== null) {
+    return "finished";
+  }
+  if (shell.session?.status === "ready" || shell.session?.status === "idle") {
+    return "finished";
+  }
+  return "ready";
 }
 
 export function normalizeShell(

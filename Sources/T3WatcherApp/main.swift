@@ -120,7 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private func notifyTransitions(in next: WatcherSnapshot) {
     if hasLoadedSnapshot {
       for thread in next.threads where previousStatuses[thread.key] != thread.status {
-        guard ["waiting", "failed", "interrupted", "completed"].contains(thread.status) else {
+        guard ["approval", "input", "plan_ready", "failed", "finished"].contains(thread.status) else {
           continue
         }
         let content = UNMutableNotificationContent()
@@ -147,9 +147,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       menu.addItem(disabledItem(error, color: .systemRed))
     }
 
-    addGroup(to: menu, title: "NEEDS YOU", statuses: ["waiting", "failed", "interrupted"], snapshot: snapshot)
-    addGroup(to: menu, title: "WORKING", statuses: ["running"], snapshot: snapshot)
-    addGroup(to: menu, title: "FINISHED / ACTIVE", statuses: ["completed", "active"], snapshot: snapshot)
+    addGroup(
+      to: menu,
+      title: "NEEDS YOU",
+      statuses: ["approval", "input", "plan_ready", "failed"],
+      snapshot: snapshot
+    )
+    addGroup(to: menu, title: "WORKING", statuses: ["starting", "running"], snapshot: snapshot)
+    addGroup(to: menu, title: "FINISHED", statuses: ["finished"], snapshot: snapshot)
+    addGroup(to: menu, title: "READY", statuses: ["ready"], snapshot: snapshot)
 
     if snapshot.threads.isEmpty {
       menu.addItem(.separator())
@@ -169,16 +175,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       return
     }
 
-    let attention = snapshot.threads.filter { ["waiting", "failed", "interrupted"].contains($0.status) }.count
-    let running = snapshot.threads.filter { $0.status == "running" }.count
-    let completed = snapshot.threads.filter { $0.status == "completed" }.count
+    let attention = snapshot.threads.filter {
+      ["approval", "input", "plan_ready", "failed"].contains($0.status)
+    }.count
+    let running = snapshot.threads.filter { ["starting", "running"].contains($0.status) }.count
+    let finished = snapshot.threads.filter { $0.status == "finished" }.count
     let title = NSMutableAttributedString()
     if attention > 0 { append(" !\(attention)", to: title) }
     if running > 0 { append(" ●\(running)", to: title) }
-    if completed > 0 {
+    if finished > 0 {
       append(" ", to: title)
       append("✓", to: title, color: .systemGreen)
-      append("\(completed)", to: title)
+      append("\(finished)", to: title)
     }
     if title.length == 0 { append(" ·", to: title) }
     statusItem.button?.attributedTitle = title
@@ -223,30 +231,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   private func notificationTitle(for status: String) -> String {
     switch status {
-    case "waiting": return "T3 thread needs you"
+    case "approval": return "T3 approval needed"
+    case "input": return "T3 thread needs input"
+    case "plan_ready": return "T3 plan is ready"
     case "failed": return "T3 thread failed"
-    case "interrupted": return "T3 thread was interrupted"
-    default: return "T3 thread completed"
+    default: return "T3 thread finished"
     }
   }
 
   private func statusLabel(_ status: String) -> String {
     switch status {
-    case "waiting": return "Waiting for you"
+    case "approval": return "Approval needed"
+    case "input": return "Awaiting input"
+    case "plan_ready": return "Plan ready"
     case "failed": return "Failed"
-    case "interrupted": return "Interrupted"
-    case "running": return "Running"
-    case "completed": return "Completed"
-    default: return "Active"
+    case "starting": return "Starting"
+    case "running": return "Working"
+    case "finished": return "Finished"
+    default: return "Ready"
     }
   }
 
   private func statusColor(_ status: String) -> NSColor {
     switch status {
-    case "waiting": return .systemOrange
-    case "failed", "interrupted": return .systemRed
-    case "running": return .systemBlue
-    case "completed": return .systemGreen
+    case "approval": return .systemOrange
+    case "input": return .systemIndigo
+    case "plan_ready": return .systemPurple
+    case "failed": return .systemRed
+    case "starting", "running": return .systemBlue
+    case "finished": return .systemGreen
     default: return .secondaryLabelColor
     }
   }

@@ -15,6 +15,7 @@ export const DEMO_SHELL: T3ShellSnapshot = {
       id: "thread-waiting",
       projectId: "project-kase",
       title: "Review the authentication migration",
+      interactionMode: "default",
       latestTurn: {
         turnId: "turn-waiting",
         state: "running",
@@ -36,6 +37,7 @@ export const DEMO_SHELL: T3ShellSnapshot = {
       id: "thread-running",
       projectId: "project-infra",
       title: "Make preview reconnect after sleep",
+      interactionMode: "default",
       latestTurn: {
         turnId: "turn-running",
         state: "running",
@@ -57,6 +59,7 @@ export const DEMO_SHELL: T3ShellSnapshot = {
       id: "thread-completed",
       projectId: "project-kase",
       title: "Clean up the deployment notes",
+      interactionMode: "default",
       latestTurn: {
         turnId: "turn-completed",
         state: "completed",

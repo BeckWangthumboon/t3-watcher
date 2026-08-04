@@ -22,7 +22,7 @@ describe("renderSwiftBar", () => {
     const output = renderSwiftBar(snapshot);
     expect(output).toStartWith("●1 | sfimage=eye ansi=true\n---");
     expect(output).toContain("WORKING · 1");
-    expect(output).toContain("Running · Build permissions UI");
+    expect(output).toContain("Working · Build permissions UI");
     expect(output).not.toContain("href=");
     expect(output).not.toContain("Open watcher");
   });
@@ -34,13 +34,13 @@ describe("renderSwiftBar", () => {
     expect(output).toContain("Build permissions UI");
   });
 
-  test("keeps completed count visible beside other states", () => {
+  test("keeps finished count visible beside other states", () => {
     const mixed = {
       ...snapshot,
       threads: [
         snapshot.threads[0]!,
-        { ...snapshot.threads[0]!, key: "environment:completed", status: "completed" as const },
-        { ...snapshot.threads[0]!, key: "environment:waiting", status: "waiting" as const },
+        { ...snapshot.threads[0]!, key: "environment:finished", status: "finished" as const },
+        { ...snapshot.threads[0]!, key: "environment:approval", status: "approval" as const },
       ],
     };
     expect(renderSwiftBar(mixed)).toStartWith(
@@ -54,14 +54,14 @@ describe("findStatusTransitions", () => {
     expect(findStatusTransitions(new Map(), snapshot, false)).toEqual([]);
   });
 
-  test("reports a running to completed transition", () => {
-    const completed = {
+  test("reports a running to finished transition", () => {
+    const finished = {
       ...snapshot,
-      threads: [{ ...snapshot.threads[0]!, status: "completed" as const }],
+      threads: [{ ...snapshot.threads[0]!, status: "finished" as const }],
     };
     expect(
-      findStatusTransitions(new Map([["environment:running", "running"]]), completed, true),
-    ).toEqual([{ thread: completed.threads[0], previousStatus: "running" }]);
+      findStatusTransitions(new Map([["environment:running", "running"]]), finished, true),
+    ).toEqual([{ thread: finished.threads[0], previousStatus: "running" }]);
   });
 });
 

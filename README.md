@@ -119,7 +119,7 @@ osascript -e 'tell application "T3 Watcher" to quit'
 
 To start it automatically when you sign in, add **T3 Watcher** under **System Settings → General → Login Items**. The app has no Dock icon; the eye and its counts are the application UI.
 
-The native app holds one SSE connection to the watcher, displays a green completed check using native attributed text, and sends macOS notifications for noteworthy transitions. It is configured for the current Tailnet URL in `packaging/Info.plist`.
+The native app holds one SSE connection to the watcher, displays a green finished check using native attributed text, and sends macOS notifications for noteworthy transitions. It is configured for the current Tailnet URL in `packaging/Info.plist`.
 
 ## Legacy SwiftBar prototype
 
@@ -127,13 +127,13 @@ The repository retains the earlier streamable SwiftBar plugin at `swiftbar/t3-wa
 
 The plugin:
 
-- shows attention, running, completed, empty, and disconnected states in the menu bar;
+- shows attention, working, finished, ready, empty, and disconnected states in the menu bar;
 - lists unsettled threads in its dropdown;
 - keeps cached rows visible when the watcher disconnects;
 - reconnects with bounded backoff;
 - suppresses notifications for its initial snapshot;
-- sends notifications when a thread becomes waiting, failed, interrupted, or completed.
+- sends notifications when a thread needs approval or input, has a plan ready, fails, or finishes.
 
 It defaults to the current Tailnet URL and can be pointed elsewhere with `T3_WATCHER_URL`.
 
-The plugin is deliberately view-only. It has no links to the draft browser interface, no acknowledgment state, and no mutation actions. An SF Symbols `eye` replaces the text title while keeping the status counts visible, for example `eye !1 ●2 ✓3`: `!` is attention (waiting, failed, or interrupted), `●` is running, and the green `✓` is completed.
+The plugin is deliberately view-only. It has no links to the draft browser interface, no acknowledgment state, and no mutation actions. An SF Symbols `eye` replaces the text title while keeping the status counts visible, for example `eye !1 ●2 ✓3`: `!` is attention (approval, input, plan-ready, or failed), `●` is starting or working, and the green `✓` is finished according to T3's external-awareness rules. A stopped or genuinely interrupted thread is Ready, not attention. The finished count is intentionally not identical to T3's client-local unread Done indicator.

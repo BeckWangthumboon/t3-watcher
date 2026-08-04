@@ -31,6 +31,7 @@ export interface T3ThreadShell {
   id: string;
   projectId: string;
   title: string;
+  interactionMode: "default" | "plan";
   latestTurn: T3LatestTurn | null;
   session: T3Session | null;
   updatedAt: string;
@@ -51,12 +52,14 @@ export interface T3ShellSnapshot {
 }
 
 export type WatcherStatus =
-  | "waiting"
+  | "approval"
+  | "input"
+  | "plan_ready"
   | "failed"
-  | "interrupted"
+  | "starting"
   | "running"
-  | "completed"
-  | "active";
+  | "finished"
+  | "ready";
 
 export type WatcherConnection = "connecting" | "live" | "stale" | "error";
 

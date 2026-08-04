@@ -7,6 +7,7 @@ import type { WatcherSnapshot } from "./types.ts";
 
 const config = await loadConfig();
 const store = new WatcherStore(config.watcherName);
+let poller: T3Poller | null = null;
 
 if (config.demo) {
   store.set({
@@ -22,10 +23,8 @@ if (config.demo) {
     }),
   });
 } else {
-  const poller = new T3Poller(config, store);
+  poller = new T3Poller(config, store);
   void poller.start();
-  process.once("SIGTERM", () => poller.stop());
-  process.once("SIGINT", () => poller.stop());
 }
 
 const encoder = new TextEncoder();
@@ -99,3 +98,11 @@ const server = Bun.serve({
 });
 
 console.log(`T3 Watcher listening on ${server.url}`);
+
+function shutdown(): void {
+  poller?.stop();
+  void server.stop(true);
+}
+
+process.once("SIGTERM", shutdown);
+process.once("SIGINT", shutdown);

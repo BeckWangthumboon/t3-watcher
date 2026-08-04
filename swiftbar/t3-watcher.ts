@@ -14,7 +14,15 @@ interface WatchedThread {
   key: string;
   title: string;
   projectTitle: string | null;
-  status: "waiting" | "failed" | "interrupted" | "running" | "completed" | "active";
+  status:
+    | "approval"
+    | "input"
+    | "plan_ready"
+    | "failed"
+    | "starting"
+    | "running"
+    | "finished"
+    | "ready";
   updatedAt: string;
 }
 
@@ -34,28 +42,33 @@ export interface StatusTransition {
 const DEFAULT_WATCHER_URL = "http://100.70.142.26:4173";
 const watcherUrl = (Bun.env.T3_WATCHER_URL || DEFAULT_WATCHER_URL).replace(/\/$/, "");
 const noteworthyStatuses = new Set<WatchedThread["status"]>([
-  "waiting",
+  "approval",
+  "input",
+  "plan_ready",
   "failed",
-  "interrupted",
-  "completed",
+  "finished",
 ]);
 
 const statusLabels: Record<WatchedThread["status"], string> = {
-  waiting: "Waiting for you",
+  approval: "Approval needed",
+  input: "Awaiting input",
+  plan_ready: "Plan ready",
   failed: "Failed",
-  interrupted: "Interrupted",
-  running: "Running",
-  completed: "Completed",
-  active: "Active",
+  starting: "Starting",
+  running: "Working",
+  finished: "Finished",
+  ready: "Ready",
 };
 
 const statusColors: Record<WatchedThread["status"], string> = {
-  waiting: "#A86813",
+  approval: "#A86813",
+  input: "#6852A8",
+  plan_ready: "#7450A8",
   failed: "#AD3E35",
-  interrupted: "#AD3E35",
-  running: "#247052",
-  completed: "#376585",
-  active: "#71756E",
+  starting: "#376585",
+  running: "#376585",
+  finished: "#247052",
+  ready: "#71756E",
 };
 
 const green = "\u001b[32m";
@@ -65,9 +78,10 @@ const groups: Array<{
   title: string;
   statuses: WatchedThread["status"][];
 }> = [
-  { title: "Needs you", statuses: ["waiting", "failed", "interrupted"] },
-  { title: "Working", statuses: ["running"] },
-  { title: "Finished / active", statuses: ["completed", "active"] },
+  { title: "Needs you", statuses: ["approval", "input", "plan_ready", "failed"] },
+  { title: "Working", statuses: ["starting", "running"] },
+  { title: "Finished", statuses: ["finished"] },
+  { title: "Ready", statuses: ["ready"] },
 ];
 
 function safeText(value: string): string {
@@ -91,14 +105,16 @@ function relativeTime(value: string, now = Date.now()): string {
 function menuTitle(snapshot: WatcherSnapshot): string {
   if (snapshot.watcher !== "live") return "?";
   const attention = snapshot.threads.filter((thread) =>
-    ["waiting", "failed", "interrupted"].includes(thread.status),
+    ["approval", "input", "plan_ready", "failed"].includes(thread.status),
   ).length;
-  const running = snapshot.threads.filter((thread) => thread.status === "running").length;
-  const completed = snapshot.threads.filter((thread) => thread.status === "completed").length;
+  const running = snapshot.threads.filter((thread) =>
+    ["starting", "running"].includes(thread.status),
+  ).length;
+  const finished = snapshot.threads.filter((thread) => thread.status === "finished").length;
   const parts = [
     attention > 0 ? `!${attention}` : null,
     running > 0 ? `●${running}` : null,
-    completed > 0 ? `${green}✓${resetColor}${completed}` : null,
+    finished > 0 ? `${green}✓${resetColor}${finished}` : null,
   ].filter((part): part is string => part !== null);
   if (parts.length > 0) return parts.join(" ");
   if (snapshot.threads.length > 0) return `${snapshot.threads.length}`;
