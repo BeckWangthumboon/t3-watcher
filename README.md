@@ -2,7 +2,7 @@
 
 A small, read-only companion for seeing which T3 Code threads are still unsettled.
 
-> **Draft:** the current browser interface is a disposable validation surface. It is intentionally not the final menu-bar application or finished product design.
+> **Draft:** the native menu-bar interface is intentionally minimal. It validates the workflow before investing in finished product design.
 
 The validation build runs beside T3 Code, polls its compact shell snapshot, keeps state in memory, and serves a minimal live-updating web interface. It does not read T3's database or mutate threads.
 
@@ -12,7 +12,7 @@ The watcher is running on `mintbox` and is available to devices on the same Tail
 
 <http://100.70.142.26:4173>
 
-It targets the installed T3 server at `127.0.0.1:3773` with a dedicated `orchestration:read` session. The service is a transient user-level systemd unit, so it survives SSH disconnects but does not automatically return after `mintbox` reboots.
+It targets the installed T3 server at `127.0.0.1:3773` with a dedicated `orchestration:read` session. It is an enabled user-level systemd service and automatically returns after `mintbox` reboots.
 
 Check it with:
 
@@ -20,10 +20,10 @@ Check it with:
 ssh mintbox 'systemctl --user status t3-watcher.service'
 ```
 
-Restart it after a reboot with:
+Restart it with:
 
 ```sh
-ssh mintbox 'cd /home/beckthemaster/Documents/code/projects/t3-watcher && systemd-run --user --unit=t3-watcher --property=WorkingDirectory=$PWD --property=Restart=on-failure --setenv=T3_HTTP_URL=http://127.0.0.1:3773 --setenv=T3_BEARER_TOKEN_FILE=$PWD/.watcher-token --setenv=WATCHER_NAME=mintbox --setenv=WATCHER_HOST=100.70.142.26 --setenv=PORT=4173 /usr/local/bin/bun src/server.ts'
+ssh mintbox 'systemctl --user restart t3-watcher.service'
 ```
 
 Stop it with:
@@ -87,13 +87,43 @@ bun run typecheck
 - No database or notification history.
 - No recovery of transitions while the watcher is stopped.
 - No exact change-request-aware settlement calculation.
-- No dedicated native application package yet; SwiftBar is the Mac frontend.
+- Ad-hoc local code signing instead of Developer ID distribution or notarization.
 
-These are validation choices. The normalized snapshot/SSE boundary can remain in place if the frontend later becomes a native macOS menu-bar application.
+These are validation choices. The normalized snapshot/SSE boundary is shared by the native app and the legacy SwiftBar prototype.
 
-## SwiftBar draft
+## Native macOS app
 
-The repository includes a streamable SwiftBar plugin at `swiftbar/t3-watcher.ts`. It holds one SSE connection to the watcher, so menu-bar updates arrive as soon as the watcher publishes a new snapshot rather than waiting for a refresh interval.
+Build and package the app:
+
+```sh
+./scripts/build-macos-app.sh
+```
+
+Install it in `/Applications` and launch it:
+
+```sh
+./scripts/install-macos-app.sh
+```
+
+After that, start it like any other app—from Spotlight, Finder, or:
+
+```sh
+open -a "T3 Watcher"
+```
+
+Quit from its menu or run:
+
+```sh
+osascript -e 'tell application "T3 Watcher" to quit'
+```
+
+To start it automatically when you sign in, add **T3 Watcher** under **System Settings → General → Login Items**. The app has no Dock icon; the eye and its counts are the application UI.
+
+The native app holds one SSE connection to the watcher, displays a green completed check using native attributed text, and sends macOS notifications for noteworthy transitions. It is configured for the current Tailnet URL in `packaging/Info.plist`.
+
+## Legacy SwiftBar prototype
+
+The repository retains the earlier streamable SwiftBar plugin at `swiftbar/t3-watcher.ts` as a prototype, but the installed plugin is disabled now that the native app replaces it.
 
 The plugin:
 
