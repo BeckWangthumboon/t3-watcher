@@ -87,6 +87,23 @@ bun run typecheck
 - No database or notification history.
 - No recovery of transitions while the watcher is stopped.
 - No exact change-request-aware settlement calculation.
-- No native notifications or menu-bar packaging yet.
+- No dedicated native application package yet; SwiftBar is the Mac frontend.
 
 These are validation choices. The normalized snapshot/SSE boundary can remain in place if the frontend later becomes a native macOS menu-bar application.
+
+## SwiftBar draft
+
+The repository includes a streamable SwiftBar plugin at `swiftbar/t3-watcher.ts`. It holds one SSE connection to the watcher, so menu-bar updates arrive as soon as the watcher publishes a new snapshot rather than waiting for a refresh interval.
+
+The plugin:
+
+- shows attention, running, completed, empty, and disconnected states in the menu bar;
+- lists unsettled threads in its dropdown;
+- keeps cached rows visible when the watcher disconnects;
+- reconnects with bounded backoff;
+- suppresses notifications for its initial snapshot;
+- sends notifications when a thread becomes waiting, failed, interrupted, or completed.
+
+It defaults to the current Tailnet URL and can be pointed elsewhere with `T3_WATCHER_URL`.
+
+The plugin is deliberately view-only. It has no links to the draft browser interface, no acknowledgment state, and no mutation actions. The menu-bar title keeps the completed count visible alongside attention and running counts, for example `T3 Watcher !1 ●2 ✓3`.
