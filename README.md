@@ -106,4 +106,4 @@ The plugin:
 
 It defaults to the current Tailnet URL and can be pointed elsewhere with `T3_WATCHER_URL`.
 
-The plugin is deliberately view-only. It has no links to the draft browser interface, no acknowledgment state, and no mutation actions. An SF Symbols `eye` replaces the text title while keeping the status counts visible, for example `eye !1 ●2 ✓3`: `!` is attention (waiting, failed, or interrupted), `●` is running, and `✓` is completed.
+The plugin is deliberately view-only. It has no links to the draft browser interface, no acknowledgment state, and no mutation actions. An SF Symbols `eye` replaces the text title while keeping the status counts visible, for example `eye !1 ●2 ✓3`: `!` is attention (waiting, failed, or interrupted), `●` is running, and the green `✓` is completed.

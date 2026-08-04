@@ -58,6 +58,9 @@ const statusColors: Record<WatchedThread["status"], string> = {
   active: "#71756E",
 };
 
+const green = "\u001b[32m";
+const resetColor = "\u001b[0m";
+
 const groups: Array<{
   title: string;
   statuses: WatchedThread["status"][];
@@ -95,7 +98,7 @@ function menuTitle(snapshot: WatcherSnapshot): string {
   const parts = [
     attention > 0 ? `!${attention}` : null,
     running > 0 ? `●${running}` : null,
-    completed > 0 ? `✓${completed}` : null,
+    completed > 0 ? `${green}✓${resetColor}${completed}` : null,
   ].filter((part): part is string => part !== null);
   if (parts.length > 0) return parts.join(" ");
   if (snapshot.threads.length > 0) return `${snapshot.threads.length}`;
@@ -103,7 +106,7 @@ function menuTitle(snapshot: WatcherSnapshot): string {
 }
 
 export function renderSwiftBar(snapshot: WatcherSnapshot): string {
-  const lines = [`${menuTitle(snapshot)} | sfimage=eye`, "---", "T3 Watcher — Draft"];
+  const lines = [`${menuTitle(snapshot)} | sfimage=eye ansi=true`, "---", "T3 Watcher — Draft"];
   const connectionLabel =
     snapshot.watcher === "live"
       ? `Live · ${safeText(snapshot.watcherName)}`
