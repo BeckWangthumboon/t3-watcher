@@ -86,7 +86,7 @@ function relativeTime(value: string, now = Date.now()): string {
 }
 
 function menuTitle(snapshot: WatcherSnapshot): string {
-  if (snapshot.watcher !== "live") return "T3 Watcher ?";
+  if (snapshot.watcher !== "live") return "?";
   const attention = snapshot.threads.filter((thread) =>
     ["waiting", "failed", "interrupted"].includes(thread.status),
   ).length;
@@ -97,13 +97,13 @@ function menuTitle(snapshot: WatcherSnapshot): string {
     running > 0 ? `●${running}` : null,
     completed > 0 ? `✓${completed}` : null,
   ].filter((part): part is string => part !== null);
-  if (parts.length > 0) return `T3 Watcher ${parts.join(" ")}`;
-  if (snapshot.threads.length > 0) return `T3 Watcher ${snapshot.threads.length}`;
-  return "T3 Watcher ·";
+  if (parts.length > 0) return parts.join(" ");
+  if (snapshot.threads.length > 0) return `${snapshot.threads.length}`;
+  return "·";
 }
 
 export function renderSwiftBar(snapshot: WatcherSnapshot): string {
-  const lines = [menuTitle(snapshot), "---", "T3 Watcher — Draft"];
+  const lines = [`${menuTitle(snapshot)} | sfimage=eye`, "---", "T3 Watcher — Draft"];
   const connectionLabel =
     snapshot.watcher === "live"
       ? `Live · ${safeText(snapshot.watcherName)}`

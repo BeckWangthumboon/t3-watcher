@@ -20,7 +20,7 @@ const snapshot = {
 describe("renderSwiftBar", () => {
   test("renders a compact running title and dropdown", () => {
     const output = renderSwiftBar(snapshot);
-    expect(output).toStartWith("T3 Watcher ●1\n---");
+    expect(output).toStartWith("●1 | sfimage=eye\n---");
     expect(output).toContain("WORKING · 1");
     expect(output).toContain("Running · Build permissions UI");
     expect(output).not.toContain("href=");
@@ -29,7 +29,7 @@ describe("renderSwiftBar", () => {
 
   test("renders disconnected state without hiding cached threads", () => {
     const output = renderSwiftBar({ ...snapshot, watcher: "stale", error: "Network unavailable" });
-    expect(output).toStartWith("T3 Watcher ?\n---");
+    expect(output).toStartWith("? | sfimage=eye\n---");
     expect(output).toContain("Network unavailable");
     expect(output).toContain("Build permissions UI");
   });
@@ -43,7 +43,7 @@ describe("renderSwiftBar", () => {
         { ...snapshot.threads[0]!, key: "environment:waiting", status: "waiting" as const },
       ],
     };
-    expect(renderSwiftBar(mixed)).toStartWith("T3 Watcher !1 ●1 ✓1\n---");
+    expect(renderSwiftBar(mixed)).toStartWith("!1 ●1 ✓1 | sfimage=eye\n---");
   });
 });
 
