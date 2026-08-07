@@ -8,6 +8,8 @@
   <string>T3 Watcher</string>
   <key>CFBundleIdentifier</key>
   <string>com.beck.t3-watcher</string>
+  <key>CFBundleIconFile</key>
+  <string>T3Watcher</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>

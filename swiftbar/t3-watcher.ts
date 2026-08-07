@@ -1,6 +1,6 @@
 #!/Users/beck/.bun/bin/bun
 // <xbar.title>T3 Watcher</xbar.title>
-// <xbar.version>v0.1.0-draft</xbar.version>
+// <xbar.version>v0.1.0</xbar.version>
 // <xbar.author>Beck</xbar.author>
 // <xbar.desc>Live unsettled T3 thread status from mintbox.</xbar.desc>
 // <xbar.dependencies>bun,tailscale</xbar.dependencies>
@@ -122,7 +122,7 @@ function menuTitle(snapshot: WatcherSnapshot): string {
 }
 
 export function renderSwiftBar(snapshot: WatcherSnapshot): string {
-  const lines = [`${menuTitle(snapshot)} | sfimage=eye ansi=true`, "---", "T3 Watcher — Draft"];
+  const lines = [`${menuTitle(snapshot)} | sfimage=eye ansi=true`, "---", "T3 Watcher"];
   const connectionLabel =
     snapshot.watcher === "live"
       ? `Live · ${safeText(snapshot.watcherName)}`

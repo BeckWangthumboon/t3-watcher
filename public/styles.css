@@ -62,20 +62,6 @@ footer,
   letter-spacing: 0.14em;
 }
 
-.draft-badge {
-  display: inline-block;
-  margin-left: 7px;
-  padding: 3px 6px 2px;
-  border: 1px solid #d8c59f;
-  border-radius: 5px;
-  background: var(--amber-soft);
-  color: #7a5115;
-  font-family: Inter, ui-sans-serif, sans-serif;
-  font-size: 9px;
-  letter-spacing: 0.12em;
-  vertical-align: 1px;
-}
-
 h1 {
   margin: 0;
   font-family: Georgia, "Times New Roman", serif;

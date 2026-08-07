@@ -20,8 +20,9 @@ struct WatchedThread: Codable {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
   private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+  private let t3CodeURL = URL(fileURLWithPath: "/Applications/T3 Code (Nightly).app")
   private var streamTask: Task<Void, Never>?
   private var previousStatuses: [String: String] = [:]
   private var hasLoadedSnapshot = false
@@ -35,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     configureStatusItem()
+    UNUserNotificationCenter.current().delegate = self
     Self.requestNotificationPermission()
     connect()
   }
@@ -45,16 +47,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   private func configureStatusItem() {
     guard let button = statusItem.button else { return }
-    button.image = NSImage(systemSymbolName: "eye", accessibilityDescription: "T3 Watcher")
-    button.image?.isTemplate = true
+    button.image = WatcherMark.image(dotColor: .systemOrange)
+    button.image?.accessibilityDescription = "T3 Watcher"
     button.imagePosition = .imageLeading
+    button.imageScaling = .scaleProportionallyDown
+    button.toolTip = "T3 Watcher"
     showConnecting()
   }
 
   private func showConnecting() {
+    statusItem.button?.image = WatcherMark.image(dotColor: .systemOrange)
     statusItem.button?.attributedTitle = NSAttributedString(string: " …")
     let menu = NSMenu()
-    menu.addItem(disabledItem("T3 Watcher — Draft"))
+    menu.addItem(disabledItem("T3 Watcher"))
     menu.addItem(disabledItem("Connecting to mintbox…", color: .secondaryLabelColor))
     menu.addItem(.separator())
     menu.addItem(quitItem())
@@ -138,7 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private func render(_ snapshot: WatcherSnapshot) {
     renderTitle(snapshot)
     let menu = NSMenu()
-    menu.addItem(disabledItem("T3 Watcher — Draft"))
+    menu.addItem(disabledItem("T3 Watcher"))
     let connection = snapshot.watcher == "live"
       ? "Live · \(snapshot.watcherName)"
       : "Unavailable · \(snapshot.watcherName)"
@@ -162,6 +167,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       menu.addItem(disabledItem("No unsettled threads", color: .secondaryLabelColor))
     }
     menu.addItem(.separator())
+    let notifications = NSMenuItem(
+      title: "Enable Notifications",
+      action: #selector(enableNotifications),
+      keyEquivalent: ""
+    )
+    notifications.target = self
+    menu.addItem(notifications)
     let reconnect = NSMenuItem(title: "Reconnect", action: #selector(reconnect), keyEquivalent: "r")
     reconnect.target = self
     menu.addItem(reconnect)
@@ -171,7 +183,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   private func renderTitle(_ snapshot: WatcherSnapshot) {
     guard snapshot.watcher == "live" else {
-      statusItem.button?.attributedTitle = NSAttributedString(string: " ?")
+      statusItem.button?.image = WatcherMark.image(dotColor: .systemOrange)
+      statusItem.button?.attributedTitle = NSAttributedString(
+        string: " ?",
+        attributes: [.foregroundColor: NSColor.systemOrange]
+      )
+      statusItem.button?.toolTip = "T3 Watcher is disconnected"
       return
     }
 
@@ -179,16 +196,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       ["approval", "input", "plan_ready", "failed"].contains($0.status)
     }.count
     let running = snapshot.threads.filter { ["starting", "running"].contains($0.status) }.count
-    let finished = snapshot.threads.filter { $0.status == "finished" }.count
     let title = NSMutableAttributedString()
-    if attention > 0 { append(" !\(attention)", to: title) }
-    if running > 0 { append(" ●\(running)", to: title) }
-    if finished > 0 {
-      append(" ", to: title)
-      append("✓", to: title, color: .systemGreen)
-      append("\(finished)", to: title)
+    if attention > 0 {
+      statusItem.button?.image = WatcherMark.image(dotColor: .systemOrange)
+      append(" !\(attention)", to: title, color: .systemOrange)
+      statusItem.button?.toolTip = "T3 Watcher: \(attention) thread\(attention == 1 ? "" : "s") need attention"
+    } else if running > 0 {
+      statusItem.button?.image = WatcherMark.image(dotColor: .systemBlue)
+      append(" ●", to: title, color: .systemBlue)
+      statusItem.button?.toolTip = "T3 Watcher: work is moving"
+    } else {
+      statusItem.button?.image = WatcherMark.image(dotColor: .systemGreen)
+      append(" ✓", to: title, color: .systemGreen)
+      statusItem.button?.toolTip = "T3 Watcher: all clear"
     }
-    if title.length == 0 { append(" ·", to: title) }
     statusItem.button?.attributedTitle = title
   }
 
@@ -207,9 +228,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     menu.addItem(.separator())
     menu.addItem(disabledItem("\(title) · \(threads.count)", color: .secondaryLabelColor))
     for thread in threads {
-      menu.addItem(disabledItem("\(statusLabel(thread.status)) · \(thread.title)", color: statusColor(thread.status)))
+      menu.addItem(threadItem(thread))
       menu.addItem(disabledItem("    \(thread.projectTitle) · \(relativeTime(thread.updatedAt))", color: .secondaryLabelColor))
     }
+  }
+
+  private func threadItem(_ thread: WatchedThread) -> NSMenuItem {
+    let title = "\(statusLabel(thread.status)) · \(thread.title)"
+    let item = NSMenuItem(title: title, action: #selector(openT3Code), keyEquivalent: "")
+    item.target = self
+    item.attributedTitle = NSAttributedString(
+      string: title,
+      attributes: [.foregroundColor: statusColor(thread.status)]
+    )
+    return item
   }
 
   private func disabledItem(_ title: String, color: NSColor = .labelColor) -> NSMenuItem {
@@ -227,6 +259,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   nonisolated private static func requestNotificationPermission() {
     UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+  }
+
+  nonisolated func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    didReceive response: UNNotificationResponse,
+    withCompletionHandler completionHandler: @escaping () -> Void
+  ) {
+    Task { @MainActor [weak self] in
+      self?.openT3Code()
+    }
+    completionHandler()
+  }
+
+  nonisolated func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    willPresent notification: UNNotification,
+    withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+  ) {
+    completionHandler([.banner, .sound])
   }
 
   private func notificationTitle(for status: String) -> String {
@@ -293,21 +344,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     connect()
   }
 
+  @objc private func enableNotifications() {
+    UNUserNotificationCenter.current().getNotificationSettings(
+      completionHandler: Self.handleNotificationSettings
+    )
+  }
+
+  nonisolated private static func handleNotificationSettings(_ settings: UNNotificationSettings) {
+    switch settings.authorizationStatus {
+    case .notDetermined:
+      requestNotificationPermission()
+    case .denied:
+      Task { @MainActor in openNotificationSettings() }
+    default:
+      break
+    }
+  }
+
+  private static func openNotificationSettings() {
+    guard let url = URL(
+      string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension"
+    ) else { return }
+    NSWorkspace.shared.open(url)
+  }
+
+  @objc private func openT3Code() {
+    Task { [weak self] in
+      try? await Task.sleep(for: .milliseconds(100))
+      self?.activateT3Code()
+    }
+  }
+
+  private func activateT3Code() {
+    let runningApp = NSRunningApplication
+      .runningApplications(withBundleIdentifier: "com.t3tools.t3code")
+      .first { $0.bundleURL?.standardizedFileURL == t3CodeURL.standardizedFileURL }
+    if let runningApp {
+      if runningApp.isHidden { runningApp.unhide() }
+      runningApp.activate(options: [.activateAllWindows])
+      return
+    }
+
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.activates = true
+    NSWorkspace.shared.openApplication(
+      at: t3CodeURL,
+      configuration: configuration,
+      completionHandler: nil
+    )
+  }
+
   @objc private func quit() {
     NSApplication.shared.terminate(nil)
   }
 }
 
-@main
-@MainActor
-struct T3WatcherMain {
-  static func main() {
-    let application = NSApplication.shared
-    let delegate = AppDelegate()
-    application.delegate = delegate
-    application.setActivationPolicy(.accessory)
-    withExtendedLifetime(delegate) {
-      application.run()
-    }
-  }
+let application = NSApplication.shared
+let delegate = AppDelegate()
+application.delegate = delegate
+application.setActivationPolicy(.accessory)
+withExtendedLifetime(delegate) {
+  application.run()
 }
