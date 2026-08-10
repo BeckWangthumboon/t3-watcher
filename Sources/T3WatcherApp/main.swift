@@ -19,10 +19,63 @@ struct WatchedThread: Codable {
   let updatedAt: String
 }
 
+enum WatcherBadgeKind {
+  case attention
+  case working
+  case finished
+  case hidden
+}
+
+struct WatcherSummary {
+  let attentionThreads: [WatchedThread]
+  let workingThreads: [WatchedThread]
+  let finishedThreads: [WatchedThread]
+  let readyThreads: [WatchedThread]
+  let petState: PetAnimationState
+
+  var badge: (count: Int, kind: WatcherBadgeKind) {
+    if !attentionThreads.isEmpty {
+      return (attentionThreads.count, .attention)
+    }
+    if !workingThreads.isEmpty {
+      return (workingThreads.count, .working)
+    }
+    if !finishedThreads.isEmpty {
+      return (finishedThreads.count, .finished)
+    }
+    return (0, .hidden)
+  }
+
+  init(snapshot: WatcherSnapshot) {
+    attentionThreads = snapshot.threads.filter {
+      ["approval", "input", "plan_ready", "failed"].contains($0.status)
+    }
+    workingThreads = snapshot.threads.filter { ["starting", "running"].contains($0.status) }
+    finishedThreads = snapshot.threads.filter { $0.status == "finished" }
+    readyThreads = snapshot.threads.filter { $0.status == "ready" }
+
+    let statuses = Set(snapshot.threads.map(\.status))
+    if statuses.contains("failed") {
+      petState = .failed
+    } else if !statuses.isDisjoint(with: ["approval", "input"]) {
+      petState = .waiting
+    } else if statuses.contains("plan_ready") {
+      petState = .review
+    } else if !statuses.isDisjoint(with: ["starting", "running"]) {
+      petState = .running
+    } else if statuses.contains("finished") {
+      petState = .waving
+    } else {
+      petState = .idle
+    }
+  }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
   private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
   private let t3CodeURL = URL(fileURLWithPath: "/Applications/T3 Code (Nightly).app")
+  private var petOverlay: PetOverlayController!
   private var streamTask: Task<Void, Never>?
   private var previousStatuses: [String: String] = [:]
   private var hasLoadedSnapshot = false
@@ -35,6 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   }()
 
   func applicationDidFinishLaunching(_ notification: Notification) {
+    petOverlay = PetOverlayController()
     configureStatusItem()
     UNUserNotificationCenter.current().delegate = self
     Self.requestNotificationPermission()
@@ -119,7 +173,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     UserDefaults.standard.set(next.watcher, forKey: "lastWatcherState")
     notifyTransitions(in: next)
     snapshot = next
-    render(next)
+    let summary = WatcherSummary(snapshot: next)
+    petOverlay.update(summary: summary)
+    render(next, summary: summary)
   }
 
   private func notifyTransitions(in next: WatcherSnapshot) {
@@ -140,8 +196,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     hasLoadedSnapshot = true
   }
 
-  private func render(_ snapshot: WatcherSnapshot) {
-    renderTitle(snapshot)
+  private func render(_ snapshot: WatcherSnapshot, summary: WatcherSummary? = nil) {
+    let summary = summary ?? WatcherSummary(snapshot: snapshot)
+    renderTitle(snapshot, summary: summary)
     let menu = NSMenu()
     menu.addItem(disabledItem("T3 Watcher"))
     let connection = snapshot.watcher == "live"
@@ -155,18 +212,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     addGroup(
       to: menu,
       title: "NEEDS YOU",
-      statuses: ["approval", "input", "plan_ready", "failed"],
-      snapshot: snapshot
+      threads: summary.attentionThreads
     )
-    addGroup(to: menu, title: "WORKING", statuses: ["starting", "running"], snapshot: snapshot)
-    addGroup(to: menu, title: "FINISHED", statuses: ["finished"], snapshot: snapshot)
-    addGroup(to: menu, title: "READY", statuses: ["ready"], snapshot: snapshot)
+    addGroup(to: menu, title: "WORKING", threads: summary.workingThreads)
+    addGroup(to: menu, title: "FINISHED", threads: summary.finishedThreads)
+    addGroup(to: menu, title: "READY", threads: summary.readyThreads)
 
     if snapshot.threads.isEmpty {
       menu.addItem(.separator())
       menu.addItem(disabledItem("No unsettled threads", color: .secondaryLabelColor))
     }
     menu.addItem(.separator())
+    addPetControls(to: menu)
     let notifications = NSMenuItem(
       title: "Enable Notifications",
       action: #selector(enableNotifications),
@@ -181,7 +238,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     statusItem.menu = menu
   }
 
-  private func renderTitle(_ snapshot: WatcherSnapshot) {
+  private func addPetControls(to menu: NSMenu) {
+    let toggle = NSMenuItem(title: "Show Pet", action: #selector(togglePet), keyEquivalent: "")
+    toggle.target = self
+    toggle.state = petOverlay.isEnabled ? .on : .off
+    toggle.isEnabled = !petOverlay.pets.isEmpty
+    menu.addItem(toggle)
+
+    guard !petOverlay.pets.isEmpty else {
+      menu.addItem(disabledItem("No pets found in ~/.codex/pets", color: .secondaryLabelColor))
+      return
+    }
+    let choose = NSMenuItem(title: "Pet", action: nil, keyEquivalent: "")
+    let submenu = NSMenu(title: "Pet")
+    for pet in petOverlay.pets {
+      let item = NSMenuItem(title: pet.displayName, action: #selector(selectPet(_:)), keyEquivalent: "")
+      item.target = self
+      item.representedObject = pet.id
+      item.state = pet.id == petOverlay.selectedPetID ? .on : .off
+      submenu.addItem(item)
+    }
+    choose.submenu = submenu
+    menu.addItem(choose)
+
+    let size = NSMenuItem(title: "Pet Size", action: nil, keyEquivalent: "")
+    let sizeMenu = NSMenu(title: "Pet Size")
+    for option in PetOverlayController.sizePresets {
+      let item = NSMenuItem(title: option.name, action: #selector(selectPetSize(_:)), keyEquivalent: "")
+      item.target = self
+      item.representedObject = Double(option.width)
+      item.state = abs(petOverlay.petWidth - option.width) < 1 ? .on : .off
+      sizeMenu.addItem(item)
+    }
+    size.submenu = sizeMenu
+    menu.addItem(size)
+  }
+
+  private func renderTitle(_ snapshot: WatcherSnapshot, summary: WatcherSummary) {
     guard snapshot.watcher == "live" else {
       statusItem.button?.image = WatcherMark.image()
       statusItem.button?.attributedTitle = NSAttributedString(
@@ -192,10 +285,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
       return
     }
 
-    let attention = snapshot.threads.filter {
-      ["approval", "input", "plan_ready", "failed"].contains($0.status)
-    }.count
-    let running = snapshot.threads.filter { ["starting", "running"].contains($0.status) }.count
+    let attention = summary.attentionThreads.count
+    let running = summary.workingThreads.count
     let title = NSMutableAttributedString()
     if attention > 0 {
       statusItem.button?.image = WatcherMark.image()
@@ -220,10 +311,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   private func addGroup(
     to menu: NSMenu,
     title: String,
-    statuses: Set<String>,
-    snapshot: WatcherSnapshot
+    threads: [WatchedThread]
   ) {
-    let threads = snapshot.threads.filter { statuses.contains($0.status) }
     guard !threads.isEmpty else { return }
     menu.addItem(.separator())
     menu.addItem(disabledItem("\(title) · \(threads.count)", color: .secondaryLabelColor))
@@ -348,6 +437,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     UNUserNotificationCenter.current().getNotificationSettings(
       completionHandler: Self.handleNotificationSettings
     )
+  }
+
+  @objc private func togglePet() {
+    petOverlay.setEnabled(!petOverlay.isEnabled)
+    if let snapshot { render(snapshot) }
+  }
+
+  @objc private func selectPet(_ sender: NSMenuItem) {
+    guard let id = sender.representedObject as? String else { return }
+    petOverlay.selectPet(id: id)
+    if let snapshot { render(snapshot) }
+  }
+
+  @objc private func selectPetSize(_ sender: NSMenuItem) {
+    guard let width = sender.representedObject as? Double else { return }
+    petOverlay.setSize(width: width)
+    if let snapshot { render(snapshot) }
   }
 
   nonisolated private static func handleNotificationSettings(_ settings: UNNotificationSettings) {
