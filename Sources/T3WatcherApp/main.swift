@@ -47,7 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
   private func configureStatusItem() {
     guard let button = statusItem.button else { return }
-    button.image = WatcherMark.image(dotColor: .systemOrange)
+    button.image = WatcherMark.image()
     button.image?.accessibilityDescription = "T3 Watcher"
     button.imagePosition = .imageLeading
     button.imageScaling = .scaleProportionallyDown
@@ -56,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   }
 
   private func showConnecting() {
-    statusItem.button?.image = WatcherMark.image(dotColor: .systemOrange)
+    statusItem.button?.image = WatcherMark.image()
     statusItem.button?.attributedTitle = NSAttributedString(string: " …")
     let menu = NSMenu()
     menu.addItem(disabledItem("T3 Watcher"))
@@ -183,7 +183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
   private func renderTitle(_ snapshot: WatcherSnapshot) {
     guard snapshot.watcher == "live" else {
-      statusItem.button?.image = WatcherMark.image(dotColor: .systemOrange)
+      statusItem.button?.image = WatcherMark.image()
       statusItem.button?.attributedTitle = NSAttributedString(
         string: " ?",
         attributes: [.foregroundColor: NSColor.systemOrange]
@@ -198,15 +198,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     let running = snapshot.threads.filter { ["starting", "running"].contains($0.status) }.count
     let title = NSMutableAttributedString()
     if attention > 0 {
-      statusItem.button?.image = WatcherMark.image(dotColor: .systemOrange)
+      statusItem.button?.image = WatcherMark.image()
       append(" !\(attention)", to: title, color: .systemOrange)
       statusItem.button?.toolTip = "T3 Watcher: \(attention) thread\(attention == 1 ? "" : "s") need attention"
     } else if running > 0 {
-      statusItem.button?.image = WatcherMark.image(dotColor: .systemBlue)
+      statusItem.button?.image = WatcherMark.image()
       append(" ●", to: title, color: .systemBlue)
       statusItem.button?.toolTip = "T3 Watcher: work is moving"
     } else {
-      statusItem.button?.image = WatcherMark.image(dotColor: .systemGreen)
+      statusItem.button?.image = WatcherMark.image()
       append(" ✓", to: title, color: .systemGreen)
       statusItem.button?.toolTip = "T3 Watcher: all clear"
     }

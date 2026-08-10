@@ -1,12 +1,12 @@
 import AppKit
 
 enum WatcherMark {
-  static func image(size: CGFloat = 18, dotColor: NSColor = .systemGreen) -> NSImage {
+  static func image(size: CGFloat = 18) -> NSImage {
     let image = NSImage(size: NSSize(width: size, height: size))
     image.lockFocus()
 
     let scale = size / 18
-    let markColor = NSColor.labelColor
+    let markColor = NSColor.black
 
     let stem = NSBezierPath()
     stem.move(to: NSPoint(x: 6.5 * scale, y: 14.5 * scale))
@@ -40,10 +40,11 @@ enum WatcherMark {
       )
     )
     dot.lineWidth = 1.0 * scale
-    dotColor.setStroke()
+    markColor.setStroke()
     dot.stroke()
 
     image.unlockFocus()
+    image.isTemplate = true
     return image
   }
 }
