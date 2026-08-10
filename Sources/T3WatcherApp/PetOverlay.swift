@@ -46,6 +46,7 @@ enum PetLibrary {
 
 enum PetAnimationState {
   case idle
+  case jumping
   case running
   case waving
   case waiting
@@ -55,6 +56,7 @@ enum PetAnimationState {
   var row: Int {
     switch self {
     case .idle: return 0
+    case .jumping: return 4
     case .waving: return 3
     case .failed: return 5
     case .waiting: return 6
@@ -66,6 +68,7 @@ enum PetAnimationState {
   var frameDurations: [TimeInterval] {
     switch self {
     case .idle: return [1.68, 0.66, 0.66, 0.84, 0.84, 1.92]
+    case .jumping: return [0.14, 0.14, 0.14, 0.14, 0.28]
     case .waving: return [0.14, 0.14, 0.14, 0.28]
     case .failed: return [0.14, 0.14, 0.14, 0.14, 0.14, 0.14, 0.14, 0.24]
     case .waiting: return [0.15, 0.15, 0.15, 0.15, 0.15, 0.26]
@@ -148,6 +151,9 @@ private final class PetSpriteView: NSImageView {
   private let badgeView = PetBadgeView(frame: .zero)
   private var spritesheet: CGImage?
   private var state = PetAnimationState.idle
+  private var baselineState = PetAnimationState.idle
+  private var isPlayingTransition = false
+  private var hoverCyclesRemaining = 0
   private var frameIndex = 0
   private var animationTimer: Timer?
   private var dragStart: (mouse: NSPoint, origin: NSPoint)?
@@ -194,10 +200,16 @@ private final class PetSpriteView: NSImageView {
 
   override func mouseEntered(with event: NSEvent) {
     setBadgeExpanded(true)
+    guard !isPlayingTransition else { return }
+    hoverCyclesRemaining = 3
+    beginAnimation(.jumping)
   }
 
   override func mouseExited(with event: NSEvent) {
     setBadgeExpanded(false)
+    hoverCyclesRemaining = 0
+    guard !isPlayingTransition else { return }
+    beginAnimation(baselineState)
   }
 
   override func layout() {
@@ -281,8 +293,19 @@ private final class PetSpriteView: NSImageView {
     scheduleNextFrame()
   }
 
-  func setState(_ next: PetAnimationState) {
-    guard next != state else { return }
+  func setBaselineState(_ next: PetAnimationState) {
+    baselineState = next
+    guard !isPlayingTransition, hoverCyclesRemaining == 0, !isHovering, next != state else { return }
+    beginAnimation(next)
+  }
+
+  func playTransition(_ next: PetAnimationState) {
+    isPlayingTransition = true
+    hoverCyclesRemaining = 0
+    beginAnimation(next)
+  }
+
+  private func beginAnimation(_ next: PetAnimationState) {
     state = next
     frameIndex = 0
     updateFrameImage()
@@ -302,7 +325,18 @@ private final class PetSpriteView: NSImageView {
       [weak self] _ in
       Task { @MainActor in
         guard let self else { return }
-        self.frameIndex = (self.frameIndex + 1) % durations.count
+        let nextFrame = self.frameIndex + 1
+        if self.isPlayingTransition, nextFrame >= durations.count {
+          self.isPlayingTransition = false
+          self.beginAnimation(self.isHovering ? .idle : self.baselineState)
+          return
+        }
+        if self.hoverCyclesRemaining > 0, nextFrame >= durations.count {
+          self.hoverCyclesRemaining -= 1
+          self.beginAnimation(self.hoverCyclesRemaining > 0 ? .jumping : .idle)
+          return
+        }
+        self.frameIndex = nextFrame % durations.count
         self.updateFrameImage()
         self.scheduleNextFrame()
       }
@@ -422,9 +456,10 @@ final class PetOverlayController: NSObject, NSWindowDelegate {
     UserDefaults.standard.set(2, forKey: Self.sizeVersionKey)
   }
 
-  func update(summary: WatcherSummary) {
+  func update(summary: WatcherSummary, transition: PetAnimationState?) {
     spriteView.setBadge(count: summary.badge.count, kind: summary.badge.kind)
-    spriteView.setState(summary.petState)
+    spriteView.setBaselineState(summary.baselinePetState)
+    if let transition { spriteView.playTransition(transition) }
   }
 
   func windowDidMove(_ notification: Notification) {

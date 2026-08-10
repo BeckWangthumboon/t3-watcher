@@ -31,7 +31,10 @@ struct WatcherSummary {
   let workingThreads: [WatchedThread]
   let finishedThreads: [WatchedThread]
   let readyThreads: [WatchedThread]
-  let petState: PetAnimationState
+
+  var baselinePetState: PetAnimationState {
+    workingThreads.isEmpty ? .idle : .running
+  }
 
   var badge: (count: Int, kind: WatcherBadgeKind) {
     if !attentionThreads.isEmpty {
@@ -46,6 +49,17 @@ struct WatcherSummary {
     return (0, .hidden)
   }
 
+  func transitionAnimation(from previousStatuses: [String: String]) -> PetAnimationState? {
+    let enteredStatuses = Set((attentionThreads + finishedThreads).compactMap { thread in
+      previousStatuses[thread.key] == thread.status ? nil : thread.status
+    })
+    if enteredStatuses.contains("failed") { return .failed }
+    if !enteredStatuses.isDisjoint(with: ["approval", "input"]) { return .waiting }
+    if enteredStatuses.contains("plan_ready") { return .review }
+    if enteredStatuses.contains("finished") { return .waving }
+    return nil
+  }
+
   init(snapshot: WatcherSnapshot) {
     attentionThreads = snapshot.threads.filter {
       ["approval", "input", "plan_ready", "failed"].contains($0.status)
@@ -53,21 +67,6 @@ struct WatcherSummary {
     workingThreads = snapshot.threads.filter { ["starting", "running"].contains($0.status) }
     finishedThreads = snapshot.threads.filter { $0.status == "finished" }
     readyThreads = snapshot.threads.filter { $0.status == "ready" }
-
-    let statuses = Set(snapshot.threads.map(\.status))
-    if statuses.contains("failed") {
-      petState = .failed
-    } else if !statuses.isDisjoint(with: ["approval", "input"]) {
-      petState = .waiting
-    } else if statuses.contains("plan_ready") {
-      petState = .review
-    } else if !statuses.isDisjoint(with: ["starting", "running"]) {
-      petState = .running
-    } else if statuses.contains("finished") {
-      petState = .waving
-    } else {
-      petState = .idle
-    }
   }
 }
 
@@ -171,10 +170,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     UserDefaults.standard.set(next.threads.count, forKey: "lastThreadCount")
     UserDefaults.standard.set(Date(), forKey: "lastSnapshotAt")
     UserDefaults.standard.set(next.watcher, forKey: "lastWatcherState")
+    let summary = WatcherSummary(snapshot: next)
+    let petTransition = hasLoadedSnapshot
+      ? summary.transitionAnimation(from: previousStatuses)
+      : nil
     notifyTransitions(in: next)
     snapshot = next
-    let summary = WatcherSummary(snapshot: next)
-    petOverlay.update(summary: summary)
+    petOverlay.update(summary: summary, transition: petTransition)
     render(next, summary: summary)
   }
 
