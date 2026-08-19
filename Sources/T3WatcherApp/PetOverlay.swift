@@ -378,6 +378,7 @@ final class PetOverlayController: NSObject, NSWindowDelegate {
   private(set) var pets: [PetDefinition] = []
   private(set) var selectedPetID: String?
   private(set) var isEnabled: Bool
+  private var visibilityReconciliationPending = false
   var petWidth: CGFloat { panel.frame.width }
 
   override init() {
@@ -413,6 +414,7 @@ final class PetOverlayController: NSObject, NSWindowDelegate {
     spriteView.onClose = { [weak self] in
       self?.setEnabled(false)
     }
+    observeVisibilityChanges()
     reloadPets()
     restoreSize()
     restorePosition()
@@ -472,11 +474,79 @@ final class PetOverlayController: NSObject, NSWindowDelegate {
     UserDefaults.standard.set(Double(panel.frame.width), forKey: Self.widthKey)
   }
 
+  func windowDidChangeOcclusionState(_ notification: Notification) {
+    guard !panel.occlusionState.contains(.visible) else { return }
+    scheduleVisibilityReconciliation()
+  }
+
+  private func observeVisibilityChanges() {
+    let applicationCenter = NotificationCenter.default
+    applicationCenter.addObserver(
+      self,
+      selector: #selector(visibilityEnvironmentDidChange(_:)),
+      name: NSApplication.didBecomeActiveNotification,
+      object: nil
+    )
+    applicationCenter.addObserver(
+      self,
+      selector: #selector(visibilityEnvironmentDidChange(_:)),
+      name: NSApplication.didUnhideNotification,
+      object: nil
+    )
+    applicationCenter.addObserver(
+      self,
+      selector: #selector(visibilityEnvironmentDidChange(_:)),
+      name: NSApplication.didChangeScreenParametersNotification,
+      object: nil
+    )
+    let workspaceCenter = NSWorkspace.shared.notificationCenter
+    workspaceCenter.addObserver(
+      self,
+      selector: #selector(visibilityEnvironmentDidChange(_:)),
+      name: NSWorkspace.didActivateApplicationNotification,
+      object: nil
+    )
+    workspaceCenter.addObserver(
+      self,
+      selector: #selector(visibilityEnvironmentDidChange(_:)),
+      name: NSWorkspace.activeSpaceDidChangeNotification,
+      object: nil
+    )
+    workspaceCenter.addObserver(
+      self,
+      selector: #selector(visibilityEnvironmentDidChange(_:)),
+      name: NSWorkspace.didWakeNotification,
+      object: nil
+    )
+    workspaceCenter.addObserver(
+      self,
+      selector: #selector(visibilityEnvironmentDidChange(_:)),
+      name: NSWorkspace.sessionDidBecomeActiveNotification,
+      object: nil
+    )
+  }
+
+  @objc private func visibilityEnvironmentDidChange(_ notification: Notification) {
+    scheduleVisibilityReconciliation()
+  }
+
+  private func scheduleVisibilityReconciliation() {
+    guard !visibilityReconciliationPending else { return }
+    visibilityReconciliationPending = true
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      self.visibilityReconciliationPending = false
+      self.updateVisibility()
+    }
+  }
+
   private func updateVisibility() {
     guard isEnabled, selectedPetID != nil else {
       panel.orderOut(nil)
       return
     }
+    panel.level = .floating
+    panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
     panel.orderFrontRegardless()
   }
 
