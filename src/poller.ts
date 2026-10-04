@@ -1,19 +1,8 @@
 import { normalizeShell } from "./state.ts";
 import { WatcherStore } from "./store.ts";
 import type { WatcherConfig } from "./config.ts";
-import type { T3ShellSnapshot } from "./types.ts";
-import { fetchT3Descriptor } from "./t3-connection.ts";
-
-function isShellSnapshot(value: unknown): value is T3ShellSnapshot {
-  if (typeof value !== "object" || value === null) return false;
-  const candidate = value as Partial<T3ShellSnapshot>;
-  return (
-    typeof candidate.snapshotSequence === "number" &&
-    Array.isArray(candidate.projects) &&
-    Array.isArray(candidate.threads) &&
-    typeof candidate.updatedAt === "string"
-  );
-}
+import { fetchT3Descriptor, type T3EnvironmentDescriptor } from "./t3-connection.ts";
+import { parseT3Shell } from "./t3-shell.ts";
 
 function safeErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -22,10 +11,10 @@ function safeErrorMessage(error: unknown): string {
 
 export class T3Poller {
   #stopped = false;
-  #environment: { environmentId: string; label: string } | null = null;
+  #environment: T3EnvironmentDescriptor | null = null;
 
   constructor(
-    private readonly config: WatcherConfig,
+    private readonly config: WatcherConfig & { environmentId?: string; backendId?: string },
     private readonly store: WatcherStore,
   ) {}
 
@@ -43,7 +32,14 @@ export class T3Poller {
   async pollOnce(): Promise<void> {
     const checkedAt = new Date().toISOString();
     try {
-      const headers = new Headers({ accept: "application/json" });
+      const environment = await this.resolveEnvironment();
+      if (environment.orchestrationProtocolVersion !== undefined &&
+          ![1, 2].includes(environment.orchestrationProtocolVersion)) {
+        throw new Error(`Unsupported T3 orchestration protocol ${environment.orchestrationProtocolVersion}; update T3 Watcher.`);
+      }
+      // Older servers ignore this header; protocol-2 servers require it.
+      const headers = new Headers({ accept: "application/json",
+        "x-t3-orchestration-protocol": String(environment.orchestrationProtocolVersion ?? 2) });
       if (this.config.bearerToken) {
         headers.set("authorization", `Bearer ${this.config.bearerToken}`);
       }
@@ -60,9 +56,7 @@ export class T3Poller {
       if (!response.ok) {
         throw new Error(`T3 shell request returned ${response.status}`);
       }
-      const raw: unknown = await response.json();
-      if (!isShellSnapshot(raw)) throw new Error("T3 returned an invalid shell snapshot");
-      const environment = await this.resolveEnvironment();
+      const raw = parseT3Shell(await response.json(), checkedAt);
       this.store.set({
         watcher: "live",
         watcherName: this.config.watcherName ?? environment.label,
@@ -86,15 +80,18 @@ export class T3Poller {
     }
   }
 
-  async resolveEnvironment(): Promise<{ environmentId: string; label: string }> {
+  async resolveEnvironment(): Promise<T3EnvironmentDescriptor> {
     try {
       const descriptor = await fetchT3Descriptor(this.config.t3HttpUrl);
-      this.#environment = { environmentId: descriptor.environmentId, label: descriptor.label };
+      this.#environment = descriptor;
       return this.#environment;
     } catch {
       if (this.#environment) return this.#environment;
       const fallback = this.config.watcherName ?? "T3 Code";
-      return { environmentId: fallback, label: fallback };
+      return {
+        environmentId: this.config.environmentId ?? this.config.backendId ?? this.config.t3HttpUrl,
+        label: fallback, serverVersion: "unknown",
+      };
     }
   }
 }

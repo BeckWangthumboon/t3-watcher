@@ -22,12 +22,16 @@ interface WatchedThread {
     | "starting"
     | "running"
     | "finished"
+    | "waiting"
+    | "limited"
     | "ready";
   updatedAt: string;
+  backendName?: string;
+  backendWatcher?: string;
 }
 
 interface WatcherSnapshot {
-  watcher: "connecting" | "live" | "stale" | "error";
+  watcher: "connecting" | "live" | "partial" | "stale" | "error";
   watcherName: string;
   lastCheckedAt: string | null;
   error: string | null;
@@ -46,6 +50,7 @@ const noteworthyStatuses = new Set<WatchedThread["status"]>([
   "input",
   "plan_ready",
   "failed",
+  "limited",
   "finished",
 ]);
 
@@ -58,6 +63,8 @@ const statusLabels: Record<WatchedThread["status"], string> = {
   running: "Working",
   finished: "Finished",
   ready: "Ready",
+  waiting: "Waiting on background work",
+  limited: "Usage limit reached",
 };
 
 const statusColors: Record<WatchedThread["status"], string> = {
@@ -69,6 +76,8 @@ const statusColors: Record<WatchedThread["status"], string> = {
   running: "#376585",
   finished: "#247052",
   ready: "#71756E",
+  waiting: "#71756E",
+  limited: "#A86813",
 };
 
 const green = "\u001b[32m";
@@ -78,10 +87,11 @@ const groups: Array<{
   title: string;
   statuses: WatchedThread["status"][];
 }> = [
-  { title: "Needs you", statuses: ["approval", "input", "plan_ready", "failed"] },
+  { title: "Needs you", statuses: ["approval", "input", "plan_ready", "failed", "limited"] },
   { title: "Working", statuses: ["starting", "running"] },
   { title: "Finished", statuses: ["finished"] },
   { title: "Ready", statuses: ["ready"] },
+  { title: "Waiting on background work", statuses: ["waiting"] },
 ];
 
 function safeText(value: string): string {
@@ -103,18 +113,20 @@ function relativeTime(value: string, now = Date.now()): string {
 }
 
 function menuTitle(snapshot: WatcherSnapshot): string {
-  if (snapshot.watcher !== "live") return "?";
-  const attention = snapshot.threads.filter((thread) =>
-    ["approval", "input", "plan_ready", "failed"].includes(thread.status),
+  if (!["live", "partial"].includes(snapshot.watcher)) return "?";
+  const liveThreads = snapshot.threads.filter((thread) => !thread.backendWatcher || thread.backendWatcher === "live");
+  const attention = liveThreads.filter((thread) =>
+    ["approval", "input", "plan_ready", "failed", "limited"].includes(thread.status),
   ).length;
-  const running = snapshot.threads.filter((thread) =>
+  const running = liveThreads.filter((thread) =>
     ["starting", "running"].includes(thread.status),
   ).length;
-  const finished = snapshot.threads.filter((thread) => thread.status === "finished").length;
+  const finished = liveThreads.filter((thread) => thread.status === "finished").length;
   const parts = [
     attention > 0 ? `!${attention}` : null,
     running > 0 ? `●${running}` : null,
     finished > 0 ? `${green}✓${resetColor}${finished}` : null,
+    snapshot.watcher === "partial" ? "?" : null,
   ].filter((part): part is string => part !== null);
   if (parts.length > 0) return parts.join(" ");
   if (snapshot.threads.length > 0) return `${snapshot.threads.length}`;
@@ -124,7 +136,8 @@ function menuTitle(snapshot: WatcherSnapshot): string {
 export function renderSwiftBar(snapshot: WatcherSnapshot): string {
   const lines = [`${menuTitle(snapshot)} | sfimage=eye ansi=true`, "---", "T3 Watcher"];
   const connectionLabel =
-    snapshot.watcher === "live"
+    snapshot.watcher === "partial" ? `Partly connected · ${safeText(snapshot.watcherName)}`
+      : snapshot.watcher === "live"
       ? `Live · ${safeText(snapshot.watcherName)}`
       : `${snapshot.watcher === "connecting" ? "Connecting" : "Unavailable"} · ${safeText(snapshot.watcherName)}`;
   lines.push(`${connectionLabel} | color=${snapshot.watcher === "live" ? "#247052" : "#A86813"} size=11`);
@@ -140,9 +153,11 @@ export function renderSwiftBar(snapshot: WatcherSnapshot): string {
     for (const thread of threads) {
       const title = safeText(thread.title) || "Untitled thread";
       const project = safeText(thread.projectTitle || "Unlabeled project");
+      const context = [thread.backendName && safeText(thread.backendName), project].filter(Boolean).join(" · ");
+      const cached = thread.backendWatcher && thread.backendWatcher !== "live" ? "Cached · " : "";
       lines.push(
-        `${statusLabels[thread.status]} · ${title} | color=${statusColors[thread.status]}`,
-        `--${project} · ${relativeTime(thread.updatedAt)} | color=#71756E size=11`,
+        `${cached}${statusLabels[thread.status]} · ${title} | color=${statusColors[thread.status]}`,
+        `--${context} · ${relativeTime(thread.updatedAt)} | color=#71756E size=11`,
       );
     }
   }
@@ -160,10 +175,12 @@ export function findStatusTransitions(
   initialized: boolean,
 ): StatusTransition[] {
   if (!initialized) return [];
+  if (!["live", "partial"].includes(snapshot.watcher)) return [];
   const transitions: StatusTransition[] = [];
   for (const thread of snapshot.threads) {
     const previousStatus = previous.get(thread.key) ?? null;
-    if (previousStatus !== thread.status && noteworthyStatuses.has(thread.status)) {
+    if (thread.backendWatcher && thread.backendWatcher !== "live") continue;
+    if (previousStatus !== null && previousStatus !== thread.status && noteworthyStatuses.has(thread.status)) {
       transitions.push({ thread, previousStatus });
     }
   }
@@ -209,7 +226,9 @@ async function sendNotification(transition: StatusTransition): Promise<void> {
 }
 
 function statusMap(snapshot: WatcherSnapshot): Map<string, WatchedThread["status"]> {
-  return new Map(snapshot.threads.map((thread) => [thread.key, thread.status]));
+  if (!["live", "partial"].includes(snapshot.watcher)) return new Map();
+  return new Map(snapshot.threads.filter((thread) => !thread.backendWatcher || thread.backendWatcher === "live")
+    .map((thread) => [thread.key, thread.status]));
 }
 
 async function run(): Promise<never> {
@@ -264,6 +283,7 @@ async function run(): Promise<never> {
         }
       }
     } catch (error) {
+      previous.clear();
       const message = error instanceof Error ? error.message : "Could not reach watcher";
       const stale: WatcherSnapshot = lastSnapshot
         ? { ...lastSnapshot, watcher: "stale", error: message }

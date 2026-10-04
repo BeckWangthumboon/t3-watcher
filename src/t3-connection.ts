@@ -1,11 +1,12 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, writeFile } from "node:fs/promises";
 
 export interface T3EnvironmentDescriptor {
   environmentId: string;
   label: string;
   serverVersion: string;
+  orchestrationProtocolVersion?: number;
 }
 
 interface ServerRuntimeState {
@@ -25,6 +26,34 @@ export const DEFAULT_CONNECTION_FILE = join(DEFAULT_CONFIG_DIR, "connection.json
 export const DEFAULT_TOKEN_FILE = join(DEFAULT_CONFIG_DIR, "token");
 export const LEGACY_CONNECTION_FILE = ".watcher-connection.json";
 export const LEGACY_TOKEN_FILE = ".watcher-token";
+
+export function namedBackendDirectory(name: string, directory = DEFAULT_CONFIG_DIR): string {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(name) || name === "default") {
+    throw new Error("Backend names must use letters, numbers, underscores or hyphens; 'default' is reserved.");
+  }
+  return join(directory, "backends", name);
+}
+
+export async function readNamedT3Connections(directory = DEFAULT_CONFIG_DIR): Promise<Array<{
+  id: string; connection: SavedT3Connection; tokenFile: string;
+}>> {
+  let entries;
+  try {
+    entries = await readdir(join(directory, "backends"), { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  const connections = [];
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+    const backendDir = namedBackendDirectory(entry.name, directory);
+    const connection = await readSavedT3Connection(join(backendDir, "connection.json"));
+    if (!connection) continue;
+    connections.push({ id: entry.name, connection, tokenFile: join(backendDir, "token") });
+  }
+  return connections;
+}
 
 export async function saveT3Connection(
   connection: SavedT3Connection & { bearerToken: string },
@@ -87,6 +116,10 @@ export async function fetchT3Descriptor(
     typeof candidate.serverVersion !== "string"
   ) {
     throw new Error("Invalid T3 environment descriptor.");
+  }
+  if (candidate.orchestrationProtocolVersion !== undefined &&
+      !Number.isInteger(candidate.orchestrationProtocolVersion)) {
+    throw new Error("Invalid T3 orchestration protocol version.");
   }
   return candidate as T3EnvironmentDescriptor;
 }
@@ -187,7 +220,9 @@ export async function readSavedT3Connection(
       throw new Error(`Invalid T3 connection file: ${candidatePath}`);
     }
     const candidate = value as Partial<SavedT3Connection>;
-    if (typeof candidate.t3HttpUrl !== "string") {
+    if (typeof candidate.t3HttpUrl !== "string" ||
+        (candidate.environmentId !== undefined && typeof candidate.environmentId !== "string") ||
+        (candidate.label !== undefined && typeof candidate.label !== "string")) {
       throw new Error(`Invalid T3 connection file: ${candidatePath}`);
     }
     return {

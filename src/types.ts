@@ -42,6 +42,11 @@ export interface T3ThreadShell {
   hasPendingApprovals: boolean;
   hasPendingUserInput: boolean;
   hasActionableProposedPlan: boolean;
+  watcherStatus?: WatcherStatus;
+  backgroundLiveness?: "working" | "monitoring" | null;
+  snoozedUntil?: string | null;
+  pinnedAt?: string | null;
+  autoSettleDisabledAt?: string | null;
 }
 
 export interface T3ShellSnapshot {
@@ -59,9 +64,11 @@ export type WatcherStatus =
   | "starting"
   | "running"
   | "finished"
+  | "waiting"
+  | "limited"
   | "ready";
 
-export type WatcherConnection = "connecting" | "live" | "stale" | "error";
+export type WatcherConnection = "connecting" | "live" | "partial" | "stale" | "error";
 
 export interface WatchedThread {
   key: string;
@@ -74,6 +81,18 @@ export interface WatchedThread {
   latestTurnId: string | null;
   updatedAt: string;
   href: string | null;
+  backendId?: string;
+  backendName?: string;
+  backendWatcher?: WatcherConnection;
+}
+
+export interface BackendStatus {
+  id: string;
+  name: string;
+  t3HttpUrl: string;
+  watcher: WatcherConnection;
+  lastCheckedAt: string | null;
+  error: string | null;
 }
 
 export interface WatcherSnapshot {
@@ -83,4 +102,5 @@ export interface WatcherSnapshot {
   lastCheckedAt: string | null;
   error: string | null;
   threads: WatchedThread[];
+  backends?: BackendStatus[];
 }

@@ -3,9 +3,10 @@ import { mkdtemp, mkdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { WatcherConfig } from "./config.ts";
-import { exchangeT3PairingUrl, saveT3Connection } from "./t3-connection.ts";
+import { exchangeT3PairingUrl, saveT3Connection, namedBackendDirectory } from "./t3-connection.ts";
 
 const configModule = new URL("./config.ts", import.meta.url).pathname;
+const configureScript = new URL("./configure.ts", import.meta.url).pathname;
 
 async function runBun(directory: string, args: string[], env: Record<string, string> = {}) {
   const child = Bun.spawn([process.execPath, ...args], {
@@ -84,6 +85,62 @@ test("pairing saves a private profile that the service can load", async () => {
     ] as const) {
       expect((await stat(path)).mode & 0o777).toBe(mode);
     }
+  } finally {
+    await server.stop(true);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("named backend profiles keep separate credentials alongside the existing default", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "t3-watcher-config-"));
+  try {
+    await saveT3Connection({ t3HttpUrl: "http://127.0.0.1:3773", label: "Local", bearerToken: "local-token" }, directory);
+    await saveT3Connection({ t3HttpUrl: "http://mintbox:3773", label: "Mintbox", bearerToken: "mint-token" },
+      namedBackendDirectory("mintbox", directory));
+    await saveT3Connection({ t3HttpUrl: "http://studio:3773", label: "Studio", bearerToken: "studio-token" },
+      namedBackendDirectory("studio", directory));
+    const config = await readConfig(directory, { WATCHER_CONFIG_DIR: directory });
+    expect(config.backends?.map(({ id, bearerToken }) => ({ id, bearerToken }))).toEqual([
+      { id: "default", bearerToken: "local-token" },
+      { id: "mintbox", bearerToken: "mint-token" },
+      { id: "studio", bearerToken: "studio-token" },
+    ]);
+    const override = await readConfig(directory, { WATCHER_CONFIG_DIR: directory,
+      T3_HTTP_URL: "http://temporary:3773", T3_BEARER_TOKEN: "temporary-token" });
+    expect(override.backends).toHaveLength(1);
+    expect(override.backends?.[0]?.bearerToken).toBe("temporary-token");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("named-only setup does not add an unwanted implicit localhost backend", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "t3-watcher-config-"));
+  try {
+    await saveT3Connection({ t3HttpUrl: "http://mintbox:3773", bearerToken: "mint-token" },
+      namedBackendDirectory("mintbox", directory));
+    const config = await readConfig(directory, { WATCHER_CONFIG_DIR: directory });
+    expect(config.backends).toHaveLength(1);
+    expect(config.backends?.[0]?.id).toBe("mintbox");
+    expect(() => namedBackendDirectory("../escape", directory)).toThrow("Backend names");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("configure --name pairs and replaces only the requested backend", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "t3-watcher-cli-"));
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
+    return Response.json(new URL(request.url).pathname === "/.well-known/t3/environment"
+      ? { environmentId: "cli-env", label: "CLI Backend", serverVersion: "1" }
+      : { access_token: "new-token" });
+  } });
+  try {
+    await saveT3Connection({ t3HttpUrl: "http://original:3773", bearerToken: "original-token" }, directory);
+    await runBun(directory, [configureScript, "--name", "remote", `${server.url}pair#token=pairing-token`],
+      { WATCHER_CONFIG_DIR: directory });
+    const config = await readConfig(directory, { WATCHER_CONFIG_DIR: directory });
+    expect(config.backends?.map((backend) => backend.bearerToken)).toEqual(["original-token", "new-token"]);
   } finally {
     await server.stop(true);
     await rm(directory, { recursive: true, force: true });

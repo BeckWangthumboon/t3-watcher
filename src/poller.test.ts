@@ -59,3 +59,28 @@ test("descriptor failures preserve thread identity, and auth failures preserve c
     await server.stop(true);
   }
 });
+
+test("unsupported future orchestration protocols produce a useful isolated error", async () => {
+  let shellRequested = false;
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
+    if (new URL(request.url).pathname === "/.well-known/t3/environment") {
+      return Response.json({ environmentId: "future-env", label: "Future T3", serverVersion: "2",
+        orchestrationProtocolVersion: 3 });
+    }
+    shellRequested = true;
+    return Response.json(DEMO_SHELL);
+  } });
+  const store = new WatcherStore("Future T3");
+  const poller = new T3Poller({ t3HttpUrl: server.url.toString().replace(/\/$/, ""),
+    bearerToken: null, watcherName: null, pollMs: 2_000, autoSettleAfterDays: null,
+    hostname: "127.0.0.1", port: 0, webBaseUrl: null, demo: false,
+  }, store);
+  try {
+    await poller.pollOnce();
+    expect(store.snapshot.watcher).toBe("error");
+    expect(store.snapshot.error).toContain("Unsupported T3 orchestration protocol 3");
+    expect(shellRequested).toBe(false);
+  } finally {
+    await server.stop(true);
+  }
+});

@@ -11,19 +11,31 @@ const lastUpdatedElement = document.querySelector("#last-updated");
 const summaryNoteElement = document.querySelector("#summary-note");
 
 const GROUPS = [
-  { key: "needs-you", title: "Needs you", statuses: ["waiting", "failed", "interrupted"] },
-  { key: "working", title: "Working", statuses: ["running"] },
-  { key: "finished", title: "Finished / active", statuses: ["completed", "active"] },
+  { key: "needs-you", title: "Needs you", statuses: ["approval", "input", "plan_ready", "failed", "limited"] },
+  { key: "working", title: "Working", statuses: ["starting", "running"] },
+  { key: "waiting", title: "Waiting on background work", statuses: ["waiting"] },
+  { key: "finished", title: "Finished", statuses: ["finished"] },
+  { key: "ready", title: "Ready", statuses: ["ready"] },
+  { key: "cached", title: "Cached · backend unavailable", statuses: [] },
 ];
 
 const STATUS_LABELS = {
-  waiting: "Waiting for you",
+  approval: "Approval needed",
+  input: "Awaiting input",
+  plan_ready: "Plan ready",
+  starting: "Starting",
+  limited: "Usage limit reached",
+  waiting: "Background work",
   failed: "Failed",
-  interrupted: "Interrupted",
   running: "Running",
-  completed: "Completed",
-  active: "Active",
+  finished: "Finished",
+  ready: "Ready",
 };
+
+function isLive(thread, snapshot) {
+  return ["live", "partial"].includes(snapshot.watcher) &&
+    (!thread.backendWatcher || thread.backendWatcher === "live");
+}
 
 function relativeTime(value) {
   const timestamp = Date.parse(value);
@@ -64,7 +76,7 @@ function makeThreadRow(thread) {
   const title = document.createElement("h3");
   title.textContent = thread.title;
   const meta = document.createElement("p");
-  meta.textContent = thread.projectTitle || "Unlabeled project";
+  meta.textContent = [thread.backendName, thread.projectTitle || "Unlabeled project"].filter(Boolean).join(" · ");
   content.append(title, meta);
 
   const updated = document.createElement("time");
@@ -84,29 +96,34 @@ function render(snapshot) {
   const connectionLabels = {
     connecting: "Connecting",
     live: "Live",
+    partial: "Partly connected",
     stale: "Stale",
     error: "Unavailable",
   };
   connectionLabelElement.textContent = connectionLabels[snapshot.watcher];
-  staleBannerElement.hidden = snapshot.watcher !== "stale" && snapshot.watcher !== "error";
+  staleBannerElement.hidden = !["partial", "stale", "error"].includes(snapshot.watcher);
   staleDetailElement.textContent = snapshot.error || "The watcher cannot reach T3 right now.";
 
   if (snapshot.lastCheckedAt) {
     lastUpdatedElement.textContent = `Checked ${relativeTime(snapshot.lastCheckedAt)}`;
   }
 
-  const attention = snapshot.threads.filter((thread) =>
-    ["waiting", "failed", "interrupted"].includes(thread.status),
+  const liveThreads = snapshot.threads.filter((thread) => isLive(thread, snapshot));
+  const attention = liveThreads.filter((thread) =>
+    ["approval", "input", "plan_ready", "failed", "limited"].includes(thread.status),
   ).length;
-  summaryNoteElement.textContent = attention
+  summaryNoteElement.textContent = !["live", "partial"].includes(snapshot.watcher)
+    ? "Waiting for live backend data. Cached threads remain visible."
+    : attention
     ? `${attention} ${attention === 1 ? "thread needs" : "threads need"} your attention.`
-    : snapshot.threads.some((thread) => thread.status === "running")
+    : liveThreads.some((thread) => ["starting", "running"].includes(thread.status))
       ? "Work is moving. Nothing needs you right now."
       : "No thread needs immediate attention.";
 
   groupsElement.replaceChildren();
   for (const group of GROUPS) {
-    const threads = snapshot.threads.filter((thread) => group.statuses.includes(thread.status));
+    const threads = snapshot.threads.filter((thread) => group.key === "cached"
+      ? !isLive(thread, snapshot) : isLive(thread, snapshot) && group.statuses.includes(thread.status));
     if (threads.length === 0) continue;
     const section = document.createElement("section");
     section.className = "thread-group";

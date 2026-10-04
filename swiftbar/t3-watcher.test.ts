@@ -63,6 +63,16 @@ describe("findStatusTransitions", () => {
       findStatusTransitions(new Map([["environment:running", "running"]]), finished, true),
     ).toEqual([{ thread: finished.threads[0], previousStatus: "running" }]);
   });
+
+  test("suppresses first snapshots of newly connected backends and stale cached threads", () => {
+    const finished = { ...snapshot, watcher: "partial" as const, threads: [
+      { ...snapshot.threads[0]!, key: "new-env:thread", status: "finished" as const },
+      { ...snapshot.threads[0]!, status: "finished" as const, backendWatcher: "stale" },
+    ] };
+    expect(findStatusTransitions(new Map([["environment:running", "running"]]), finished, true)).toEqual([]);
+    expect(renderSwiftBar(finished)).toContain("Partly connected");
+    expect(renderSwiftBar(finished)).toContain("Cached · Finished");
+  });
 });
 
 test("parseSseBlocks preserves incomplete data", () => {

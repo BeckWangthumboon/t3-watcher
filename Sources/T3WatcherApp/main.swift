@@ -6,17 +6,32 @@ struct WatcherSnapshot: Codable {
   let watcher: String
   let watcherName: String
   let sourceUpdatedAt: String?
-  let lastCheckedAt: String
+  let lastCheckedAt: String?
   let error: String?
   let threads: [WatchedThread]
+  let backends: [BackendStatus]?
+}
+
+struct BackendStatus: Codable {
+  let id: String
+  let name: String
+  let watcher: String
+  let error: String?
 }
 
 struct WatchedThread: Codable {
   let key: String
-  let projectTitle: String
+  let projectTitle: String?
   let title: String
   let status: String
   let updatedAt: String
+  let backendName: String?
+  let backendWatcher: String?
+
+  var isLive: Bool { backendWatcher == nil || backendWatcher == "live" }
+  var context: String {
+    [backendName, projectTitle].compactMap { $0 }.joined(separator: " · ")
+  }
 }
 
 enum WatcherBadgeKind {
@@ -31,6 +46,8 @@ struct WatcherSummary {
   let workingThreads: [WatchedThread]
   let finishedThreads: [WatchedThread]
   let readyThreads: [WatchedThread]
+  let waitingThreads: [WatchedThread]
+  let unavailableThreads: [WatchedThread]
 
   var baselinePetState: PetAnimationState {
     workingThreads.isEmpty ? .idle : .running
@@ -50,10 +67,12 @@ struct WatcherSummary {
   }
 
   func transitionAnimation(from previousStatuses: [String: String]) -> PetAnimationState? {
-    let enteredStatuses = Set((attentionThreads + finishedThreads).compactMap { thread in
-      previousStatuses[thread.key] == thread.status ? nil : thread.status
+    let enteredStatuses = Set<String>((attentionThreads + finishedThreads).compactMap { thread -> String? in
+      guard let previous = previousStatuses[thread.key], previous != thread.status else { return nil }
+      return thread.status
     })
     if enteredStatuses.contains("failed") { return .failed }
+    if enteredStatuses.contains("limited") { return .waiting }
     if !enteredStatuses.isDisjoint(with: ["approval", "input"]) { return .waiting }
     if enteredStatuses.contains("plan_ready") { return .review }
     if enteredStatuses.contains("finished") { return .waving }
@@ -61,12 +80,18 @@ struct WatcherSummary {
   }
 
   init(snapshot: WatcherSnapshot) {
-    attentionThreads = snapshot.threads.filter {
-      ["approval", "input", "plan_ready", "failed"].contains($0.status)
+    let liveThreads = ["live", "partial"].contains(snapshot.watcher)
+      ? snapshot.threads.filter { $0.isLive } : []
+    unavailableThreads = snapshot.threads.filter { thread in
+      !["live", "partial"].contains(snapshot.watcher) || !thread.isLive
     }
-    workingThreads = snapshot.threads.filter { ["starting", "running"].contains($0.status) }
-    finishedThreads = snapshot.threads.filter { $0.status == "finished" }
-    readyThreads = snapshot.threads.filter { $0.status == "ready" }
+    attentionThreads = liveThreads.filter {
+      ["approval", "input", "plan_ready", "failed", "limited"].contains($0.status)
+    }
+    workingThreads = liveThreads.filter { ["starting", "running"].contains($0.status) }
+    finishedThreads = liveThreads.filter { $0.status == "finished" }
+    readyThreads = liveThreads.filter { $0.status == "ready" }
+    waitingThreads = liveThreads.filter { $0.status == "waiting" }
   }
 }
 
@@ -79,6 +104,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   private var previousStatuses: [String: String] = [:]
   private var hasLoadedSnapshot = false
   private var snapshot: WatcherSnapshot?
+  private var notificationsEnabled: Bool {
+    UserDefaults.standard.object(forKey: "threadNotificationsEnabled") as? Bool ?? true
+  }
   private var watcherURL: URL = {
     let candidates = [
       UserDefaults.standard.string(forKey: "watcherURL"),
@@ -95,7 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     petOverlay = PetOverlayController()
     configureStatusItem()
     UNUserNotificationCenter.current().delegate = self
-    Self.requestNotificationPermission()
+    if notificationsEnabled { Self.requestNotificationPermission() }
     connect()
   }
 
@@ -194,20 +222,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   }
 
   private func notifyTransitions(in next: WatcherSnapshot) {
-    if hasLoadedSnapshot {
-      for thread in next.threads where previousStatuses[thread.key] != thread.status {
-        guard ["approval", "input", "plan_ready", "failed", "finished"].contains(thread.status) else {
+    let liveThreads = ["live", "partial"].contains(next.watcher)
+      ? next.threads.filter { $0.isLive } : []
+    if hasLoadedSnapshot && notificationsEnabled {
+      for thread in liveThreads {
+        guard let previous = previousStatuses[thread.key], previous != thread.status else { continue }
+        guard ["approval", "input", "plan_ready", "failed", "limited", "finished"].contains(thread.status) else {
           continue
         }
         let content = UNMutableNotificationContent()
         content.title = notificationTitle(for: thread.status)
-        content.body = "\(thread.title) · \(thread.projectTitle)"
+        content.body = "\(thread.title) · \(thread.context)"
         content.sound = .default
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
       }
     }
-    previousStatuses = Dictionary(uniqueKeysWithValues: next.threads.map { ($0.key, $0.status) })
+    previousStatuses = Dictionary(uniqueKeysWithValues: liveThreads.map { ($0.key, $0.status) })
     hasLoadedSnapshot = true
   }
 
@@ -216,10 +247,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     renderTitle(snapshot, summary: summary)
     let menu = NSMenu()
     menu.addItem(disabledItem("T3 Watcher"))
-    let connection = snapshot.watcher == "live"
+    let connection = snapshot.watcher == "partial" ? "Partly connected · \(snapshot.watcherName)"
+      : snapshot.watcher == "live"
       ? "Live · \(snapshot.watcherName)"
       : "Unavailable · \(snapshot.watcherName)"
     menu.addItem(disabledItem(connection, color: snapshot.watcher == "live" ? .systemGreen : .systemOrange))
+    if let backends = snapshot.backends, backends.count > 1 {
+      for backend in backends {
+        let label = backend.watcher == "live" ? "Live" : backend.watcher == "connecting" ? "Connecting" : "Unavailable"
+        menu.addItem(disabledItem("\(label) · \(backend.name)",
+          color: backend.watcher == "live" ? .secondaryLabelColor : .systemOrange))
+      }
+    }
     if let error = snapshot.error, snapshot.watcher != "live" {
       menu.addItem(disabledItem(error, color: .systemRed))
     }
@@ -231,16 +270,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     )
     addGroup(to: menu, title: "WORKING", threads: summary.workingThreads)
     addGroup(to: menu, title: "FINISHED", threads: summary.finishedThreads)
+    addGroup(to: menu, title: "WAITING ON BACKGROUND WORK", threads: summary.waitingThreads)
     addGroup(to: menu, title: "READY", threads: summary.readyThreads)
+    addGroup(to: menu, title: "CACHED · BACKEND UNAVAILABLE", threads: summary.unavailableThreads)
 
     if snapshot.threads.isEmpty {
       menu.addItem(.separator())
-      menu.addItem(disabledItem("No unsettled threads", color: .secondaryLabelColor))
+      menu.addItem(disabledItem(snapshot.watcher == "live" ? "No unsettled threads" : "Waiting for backend data",
+        color: .secondaryLabelColor))
     }
     menu.addItem(.separator())
     addPetControls(to: menu)
+    let notificationToggle = NSMenuItem(title: "Notify on Thread Changes",
+      action: #selector(toggleNotifications), keyEquivalent: "")
+    notificationToggle.target = self
+    notificationToggle.state = notificationsEnabled ? .on : .off
+    menu.addItem(notificationToggle)
     let notifications = NSMenuItem(
-      title: "Enable Notifications",
+      title: "Notification Permissions…",
       action: #selector(enableNotifications),
       keyEquivalent: ""
     )
@@ -291,7 +338,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   }
 
   private func renderTitle(_ snapshot: WatcherSnapshot, summary: WatcherSummary) {
-    guard snapshot.watcher == "live" else {
+    guard ["live", "partial"].contains(snapshot.watcher) else {
       statusItem.button?.image = WatcherMark.image()
       statusItem.button?.attributedTitle = NSAttributedString(
         string: " ?",
@@ -317,6 +364,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
       append(" ✓", to: title, color: .systemGreen)
       statusItem.button?.toolTip = "T3 Watcher: all clear"
     }
+    if snapshot.watcher == "partial" {
+      append(" ?", to: title, color: .systemOrange)
+      statusItem.button?.toolTip = "T3 Watcher: some backends are unavailable"
+    }
     statusItem.button?.attributedTitle = title
   }
 
@@ -334,7 +385,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     menu.addItem(disabledItem("\(title) · \(threads.count)", color: .secondaryLabelColor))
     for thread in threads {
       menu.addItem(threadItem(thread))
-      menu.addItem(disabledItem("    \(thread.projectTitle) · \(relativeTime(thread.updatedAt))", color: .secondaryLabelColor))
+      menu.addItem(disabledItem("    \(thread.context) · \(relativeTime(thread.updatedAt))", color: .secondaryLabelColor))
     }
   }
 
@@ -401,6 +452,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     case "input": return "T3 thread needs input"
     case "plan_ready": return "T3 plan is ready"
     case "failed": return "T3 thread failed"
+    case "limited": return "T3 usage limit reached"
     default: return "T3 thread finished"
     }
   }
@@ -411,6 +463,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     case "input": return "Awaiting input"
     case "plan_ready": return "Plan ready"
     case "failed": return "Failed"
+    case "limited": return "Usage limit reached"
+    case "waiting": return "Waiting on background work"
     case "starting": return "Starting"
     case "running": return "Working"
     case "finished": return "Finished"
@@ -424,6 +478,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     case "input": return .systemIndigo
     case "plan_ready": return .systemPurple
     case "failed": return .systemRed
+    case "limited": return .systemOrange
     case "starting", "running": return .systemBlue
     case "finished": return .systemGreen
     default: return .secondaryLabelColor
@@ -439,6 +494,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   }
 
   private func showDisconnected(_ message: String) {
+    previousStatuses = [:]
+    hasLoadedSnapshot = false
     if let snapshot {
       let stale = WatcherSnapshot(
         watcher: "stale",
@@ -446,7 +503,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         sourceUpdatedAt: snapshot.sourceUpdatedAt,
         lastCheckedAt: snapshot.lastCheckedAt,
         error: message,
-        threads: snapshot.threads
+        threads: snapshot.threads,
+        backends: snapshot.backends
       )
       render(stale)
     } else {
@@ -511,6 +569,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     UNUserNotificationCenter.current().getNotificationSettings(
       completionHandler: Self.handleNotificationSettings
     )
+  }
+
+  @objc private func toggleNotifications() {
+    let enabled = !notificationsEnabled
+    UserDefaults.standard.set(enabled, forKey: "threadNotificationsEnabled")
+    if enabled { Self.requestNotificationPermission() }
+    if let snapshot { render(snapshot) }
   }
 
   @objc private func togglePet() {

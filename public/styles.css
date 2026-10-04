@@ -97,6 +97,7 @@ h1 {
 }
 
 .connection[data-state="stale"] .connection-dot,
+.connection[data-state="partial"] .connection-dot,
 .connection[data-state="connecting"] .connection-dot {
   background: var(--amber);
 }
@@ -211,23 +212,26 @@ a.thread-row:focus-visible {
   font-weight: 650;
 }
 
-.thread-row[data-status="waiting"] .status-dot {
+.thread-row[data-status="approval"] .status-dot,
+.thread-row[data-status="input"] .status-dot,
+.thread-row[data-status="plan_ready"] .status-dot,
+.thread-row[data-status="limited"] .status-dot {
   background: var(--amber);
   box-shadow: 0 0 0 3px var(--amber-soft);
 }
 
-.thread-row[data-status="failed"] .status-dot,
-.thread-row[data-status="interrupted"] .status-dot {
+.thread-row[data-status="failed"] .status-dot {
   background: var(--red);
   box-shadow: 0 0 0 3px var(--red-soft);
 }
 
-.thread-row[data-status="running"] .status-dot {
+.thread-row[data-status="running"] .status-dot,
+.thread-row[data-status="starting"] .status-dot {
   background: var(--green);
   box-shadow: 0 0 0 3px var(--green-soft);
 }
 
-.thread-row[data-status="completed"] .status-dot {
+.thread-row[data-status="finished"] .status-dot {
   background: var(--blue);
   box-shadow: 0 0 0 3px var(--blue-soft);
 }

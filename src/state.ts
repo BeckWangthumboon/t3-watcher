@@ -14,9 +14,11 @@ const STATUS_ORDER: Record<WatcherStatus, number> = {
   input: 1,
   plan_ready: 2,
   failed: 3,
+  limited: 3,
   starting: 4,
   running: 5,
   finished: 6,
+  waiting: 7,
   ready: 7,
 };
 
@@ -58,6 +60,8 @@ export function isEffectivelySettled(
   options: { nowMs: number; autoSettleAfterDays: number | null },
 ): boolean {
   if (shell.hasPendingApprovals || shell.hasPendingUserInput) return false;
+  if (["starting", "running", "waiting", "limited"].includes(shell.watcherStatus ?? "")) return false;
+  if (shell.backgroundLiveness) return false;
   if (shell.session?.status === "starting" || shell.session?.status === "running") return false;
   if (hasQueuedTurnStart(shell, options.nowMs)) {
     const settledAt = parsed(shell.settledAt);
@@ -71,6 +75,7 @@ export function isEffectivelySettled(
   }
   if (shell.settledOverride === "settled") return true;
   if (shell.settledOverride === "active") return false;
+  if (shell.pinnedAt || shell.autoSettleDisabledAt) return false;
   if (options.autoSettleAfterDays === null) return false;
   const lastActivityAt = threadLastActivityAt(shell);
   if (lastActivityAt === null) return false;
@@ -78,6 +83,7 @@ export function isEffectivelySettled(
 }
 
 export function deriveStatus(shell: T3ThreadShell, nowMs: number): WatcherStatus {
+  if (shell.watcherStatus) return shell.watcherStatus;
   if (shell.hasPendingApprovals) return "approval";
   if (shell.hasPendingUserInput) return "input";
   if (shell.session?.status === "error" || shell.latestTurn?.state === "error") {
@@ -101,6 +107,7 @@ export function deriveStatus(shell: T3ThreadShell, nowMs: number): WatcherStatus
   ) {
     return "plan_ready";
   }
+  if (shell.backgroundLiveness) return "waiting";
   if (shell.latestTurn?.state === "completed") return "finished";
   if (shell.latestTurn?.state === "interrupted" && shell.latestTurn.completedAt !== null) {
     return "finished";
@@ -126,6 +133,7 @@ export function normalizeShell(
 
   return snapshot.threads
     .filter((thread) => thread.archivedAt === null)
+    .filter((thread) => (parsed(thread.snoozedUntil) ?? 0) <= nowMs)
     .filter(
       (thread) =>
         !isEffectivelySettled(thread, {
