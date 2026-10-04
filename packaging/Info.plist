@@ -30,8 +30,8 @@
     <true/>
   </dict>
   <key>NSHumanReadableCopyright</key>
-  <string>Personal side project</string>
+  <string>T3 Watcher contributors</string>
   <key>T3WatcherURL</key>
-  <string>http://100.70.142.26:4173</string>
+  <string>http://127.0.0.1:4173</string>
 </dict>
 </plist>

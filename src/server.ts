@@ -6,13 +6,13 @@ import { WatcherStore } from "./store.ts";
 import type { WatcherSnapshot } from "./types.ts";
 
 const config = await loadConfig();
-const store = new WatcherStore(config.watcherName);
+const store = new WatcherStore(config.watcherName ?? "T3 Code");
 let poller: T3Poller | null = null;
 
 if (config.demo) {
   store.set({
     watcher: "live",
-    watcherName: config.watcherName,
+    watcherName: config.watcherName ?? "Demo environment",
     sourceUpdatedAt: DEMO_SHELL.updatedAt,
     lastCheckedAt: new Date().toISOString(),
     error: null,

@@ -79,11 +79,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   private var previousStatuses: [String: String] = [:]
   private var hasLoadedSnapshot = false
   private var snapshot: WatcherSnapshot?
-  private let watcherURL: URL = {
-    let configured = ProcessInfo.processInfo.environment["T3_WATCHER_URL"]
-      ?? Bundle.main.object(forInfoDictionaryKey: "T3WatcherURL") as? String
-      ?? "http://100.70.142.26:4173"
-    return URL(string: configured)!
+  private var watcherURL: URL = {
+    let candidates = [
+      UserDefaults.standard.string(forKey: "watcherURL"),
+      ProcessInfo.processInfo.environment["T3_WATCHER_URL"],
+      Bundle.main.object(forInfoDictionaryKey: "T3WatcherURL") as? String,
+      "http://127.0.0.1:4173",
+    ]
+    return candidates.compactMap { value in
+      value.flatMap(URL.init(string:))
+    }.first!
   }()
 
   func applicationDidFinishLaunching(_ notification: Notification) {
@@ -113,8 +118,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     statusItem.button?.attributedTitle = NSAttributedString(string: " …")
     let menu = NSMenu()
     menu.addItem(disabledItem("T3 Watcher"))
-    menu.addItem(disabledItem("Connecting to mintbox…", color: .secondaryLabelColor))
+    menu.addItem(
+      disabledItem(
+        "Connecting to \(watcherURL.host ?? watcherURL.absoluteString)…",
+        color: .secondaryLabelColor
+      )
+    )
     menu.addItem(.separator())
+    menu.addItem(configureWatcherItem())
     menu.addItem(quitItem())
     statusItem.menu = menu
   }
@@ -131,6 +142,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         } catch is CancellationError {
           return
         } catch {
+          guard !Task.isCancelled else { return }
           NSLog("T3 Watcher connection failed: %@", error.localizedDescription)
           self.showDisconnected(error.localizedDescription)
           try? await Task.sleep(for: .seconds(delay))
@@ -143,6 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   private func consumeEvents() async throws {
     let eventsURL = watcherURL.appending(path: "api/events")
     let (bytes, response) = try await URLSession.shared.bytes(from: eventsURL)
+    try Task.checkCancellation()
     guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
       throw URLError(.badServerResponse)
     }
@@ -236,6 +249,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     let reconnect = NSMenuItem(title: "Reconnect", action: #selector(reconnect), keyEquivalent: "r")
     reconnect.target = self
     menu.addItem(reconnect)
+    menu.addItem(configureWatcherItem())
     menu.addItem(quitItem())
     statusItem.menu = menu
   }
@@ -348,6 +362,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     return item
   }
 
+  private func configureWatcherItem() -> NSMenuItem {
+    let item = NSMenuItem(
+      title: "Configure Watcher…",
+      action: #selector(configureWatcher),
+      keyEquivalent: ","
+    )
+    item.target = self
+    return item
+  }
+
   nonisolated private static func requestNotificationPermission() {
     UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
   }
@@ -427,10 +451,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
       render(stale)
     } else {
       statusItem.button?.attributedTitle = NSAttributedString(string: " ?")
+      let menu = NSMenu()
+      menu.addItem(disabledItem("T3 Watcher"))
+      menu.addItem(
+        disabledItem(
+          "Cannot reach \(watcherURL.host ?? watcherURL.absoluteString)",
+          color: .systemOrange
+        )
+      )
+      menu.addItem(disabledItem(message, color: .systemRed))
+      menu.addItem(.separator())
+      menu.addItem(configureWatcherItem())
+      menu.addItem(quitItem())
+      statusItem.menu = menu
     }
   }
 
   @objc private func reconnect() {
+    showConnecting()
+    connect()
+  }
+
+  @objc private func configureWatcher() {
+    let alert = NSAlert()
+    alert.messageText = "Connect to T3 Watcher"
+    alert.informativeText = "Enter the URL of the watcher service. It can run on this Mac or on the same machine as your T3 Code backend."
+    alert.addButton(withTitle: "Connect")
+    alert.addButton(withTitle: "Cancel")
+
+    let field = NSTextField(string: watcherURL.absoluteString)
+    field.placeholderString = "http://127.0.0.1:4173"
+    field.frame = NSRect(x: 0, y: 0, width: 420, height: 24)
+    alert.accessoryView = field
+
+    guard alert.runModal() == .alertFirstButtonReturn else { return }
+    let value = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard
+      let candidate = URL(string: value),
+      ["http", "https"].contains(candidate.scheme?.lowercased() ?? ""),
+      candidate.host != nil
+    else {
+      let error = NSAlert()
+      error.messageText = "That watcher URL is not valid"
+      error.informativeText = "Use a complete http:// or https:// URL."
+      error.runModal()
+      return
+    }
+
+    watcherURL = candidate
+    UserDefaults.standard.set(candidate.absoluteString, forKey: "watcherURL")
+    snapshot = nil
+    previousStatuses = [:]
+    hasLoadedSnapshot = false
     showConnecting()
     connect()
   }
@@ -486,7 +558,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   private func activateT3Code() {
     let runningApp = NSRunningApplication
       .runningApplications(withBundleIdentifier: "com.t3tools.t3code")
-      .first { $0.bundleURL?.standardizedFileURL == t3CodeURL.standardizedFileURL }
+      .first
     if let runningApp {
       if runningApp.isHidden { runningApp.unhide() }
       runningApp.activate(options: [.activateAllWindows])
@@ -495,8 +567,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     let configuration = NSWorkspace.OpenConfiguration()
     configuration.activates = true
+    let applicationURL = [
+      URL(fileURLWithPath: "/Applications/T3 Code.app"),
+      t3CodeURL,
+    ].first { FileManager.default.fileExists(atPath: $0.path) } ?? t3CodeURL
     NSWorkspace.shared.openApplication(
-      at: t3CodeURL,
+      at: applicationURL,
       configuration: configuration,
       completionHandler: nil
     )

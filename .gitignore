@@ -1,6 +1,8 @@
 node_modules/
 .env
 .watcher-token
+.watcher-connection.json
 *.log
 .build/
 dist/
+tmp/

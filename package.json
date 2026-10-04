@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "configure": "bun src/configure.ts",
     "dev": "bun --hot src/server.ts",
     "start": "bun src/server.ts",
     "test": "bun test",

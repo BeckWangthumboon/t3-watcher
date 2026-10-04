@@ -5,13 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/beckthemaster/Documents/code/projects/t3-watcher
-Environment=T3_HTTP_URL=http://127.0.0.1:3773
-Environment=T3_BEARER_TOKEN_FILE=/home/beckthemaster/Documents/code/projects/t3-watcher/.watcher-token
-Environment=WATCHER_NAME=mintbox
-Environment=WATCHER_HOST=100.70.142.26
+WorkingDirectory=%h/.local/share/t3-watcher
+Environment=WATCHER_HOST=127.0.0.1
 Environment=PORT=4173
-ExecStart=/usr/local/bin/bun src/server.ts
+ExecStart=%h/.bun/bin/bun src/server.ts
 Restart=on-failure
 RestartSec=2
 

@@ -2,6 +2,7 @@ import { normalizeShell } from "./state.ts";
 import { WatcherStore } from "./store.ts";
 import type { WatcherConfig } from "./config.ts";
 import type { T3ShellSnapshot } from "./types.ts";
+import { fetchT3Descriptor } from "./t3-connection.ts";
 
 function isShellSnapshot(value: unknown): value is T3ShellSnapshot {
   if (typeof value !== "object" || value === null) return false;
@@ -21,6 +22,7 @@ function safeErrorMessage(error: unknown): string {
 
 export class T3Poller {
   #stopped = false;
+  #environment: { environmentId: string; label: string } | null = null;
 
   constructor(
     private readonly config: WatcherConfig,
@@ -49,20 +51,26 @@ export class T3Poller {
         headers,
         signal: AbortSignal.timeout(6_000),
       });
+      if (response.status === 401) {
+        throw new Error("T3 access expired or was revoked; pair T3 Watcher again.");
+      }
+      if (response.status === 403) {
+        throw new Error("T3 Watcher does not have orchestration:read access.");
+      }
       if (!response.ok) {
         throw new Error(`T3 shell request returned ${response.status}`);
       }
       const raw: unknown = await response.json();
       if (!isShellSnapshot(raw)) throw new Error("T3 returned an invalid shell snapshot");
-      const environmentId = await this.resolveEnvironmentId();
+      const environment = await this.resolveEnvironment();
       this.store.set({
         watcher: "live",
-        watcherName: this.config.watcherName,
+        watcherName: this.config.watcherName ?? environment.label,
         sourceUpdatedAt: raw.updatedAt,
         lastCheckedAt: checkedAt,
         error: null,
         threads: normalizeShell(raw, {
-          environmentId,
+          environmentId: environment.environmentId,
           autoSettleAfterDays: this.config.autoSettleAfterDays,
           webBaseUrl: this.config.webBaseUrl,
         }),
@@ -78,19 +86,15 @@ export class T3Poller {
     }
   }
 
-  async resolveEnvironmentId(): Promise<string> {
+  async resolveEnvironment(): Promise<{ environmentId: string; label: string }> {
     try {
-      const response = await fetch(`${this.config.t3HttpUrl}/.well-known/t3/environment`, {
-        headers: { accept: "application/json" },
-        signal: AbortSignal.timeout(3_000),
-      });
-      if (!response.ok) return this.config.watcherName;
-      const value: unknown = await response.json();
-      if (typeof value !== "object" || value === null) return this.config.watcherName;
-      const environmentId = (value as { environmentId?: unknown }).environmentId;
-      return typeof environmentId === "string" ? environmentId : this.config.watcherName;
+      const descriptor = await fetchT3Descriptor(this.config.t3HttpUrl);
+      this.#environment = { environmentId: descriptor.environmentId, label: descriptor.label };
+      return this.#environment;
     } catch {
-      return this.config.watcherName;
+      if (this.#environment) return this.#environment;
+      const fallback = this.config.watcherName ?? "T3 Code";
+      return { environmentId: fallback, label: fallback };
     }
   }
 }

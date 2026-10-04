@@ -1,14 +1,14 @@
-#!/Users/beck/.bun/bin/bun
+#!/usr/bin/env bun
 // <xbar.title>T3 Watcher</xbar.title>
 // <xbar.version>v0.1.0</xbar.version>
 // <xbar.author>Beck</xbar.author>
-// <xbar.desc>Live unsettled T3 thread status from mintbox.</xbar.desc>
+// <xbar.desc>Live unsettled T3 thread status.</xbar.desc>
 // <xbar.dependencies>bun,tailscale</xbar.dependencies>
 // <swiftbar.type>streamable</swiftbar.type>
 // <swiftbar.runInBash>false</swiftbar.runInBash>
 // <swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>
 // <swiftbar.refreshOnOpen>false</swiftbar.refreshOnOpen>
-// <swiftbar.environment>[PATH=/Users/beck/.bun/bin:/usr/local/bin:/usr/bin:/bin]</swiftbar.environment>
+// <swiftbar.environment>[PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin]</swiftbar.environment>
 
 interface WatchedThread {
   key: string;
@@ -39,7 +39,7 @@ export interface StatusTransition {
   previousStatus: WatchedThread["status"] | null;
 }
 
-const DEFAULT_WATCHER_URL = "http://100.70.142.26:4173";
+const DEFAULT_WATCHER_URL = "http://127.0.0.1:4173";
 const watcherUrl = (Bun.env.T3_WATCHER_URL || DEFAULT_WATCHER_URL).replace(/\/$/, "");
 const noteworthyStatuses = new Set<WatchedThread["status"]>([
   "approval",
@@ -230,7 +230,7 @@ async function run(): Promise<never> {
 
   emit({
     watcher: "connecting",
-    watcherName: "mintbox",
+    watcherName: "T3 Code",
     lastCheckedAt: null,
     error: null,
     threads: [],
@@ -269,7 +269,7 @@ async function run(): Promise<never> {
         ? { ...lastSnapshot, watcher: "stale", error: message }
         : {
             watcher: "error",
-            watcherName: "mintbox",
+            watcherName: "T3 Code",
             lastCheckedAt: null,
             error: message,
             threads: [],
