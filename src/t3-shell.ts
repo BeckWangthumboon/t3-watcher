@@ -59,14 +59,13 @@ function v2Thread(thread: RecordValue): T3ThreadShell {
   };
 }
 
-/** Adapt the stable v1 and October 2026 protocol-2 HTTP shell formats. */
+/** Adapt the supported protocol-2 shell into pet states. */
 export function parseT3Shell(value: unknown, checkedAt: string): T3ShellSnapshot {
-  if (!record(value) || typeof value.snapshotSequence !== "number" ||
+  if (!record(value) || !Number.isSafeInteger(value.snapshotSequence) || Number(value.snapshotSequence) < 0 ||
+      !Number.isSafeInteger(value.schemaVersion) || Number(value.schemaVersion) < 1 ||
       !Array.isArray(value.projects) || !Array.isArray(value.threads)) {
     throw new Error("T3 returned an invalid shell snapshot.");
   }
-  const v2 = typeof value.schemaVersion === "number";
-  if (!v2 && typeof value.updatedAt !== "string") throw new Error("T3 returned an invalid shell snapshot.");
   for (const project of value.projects) {
     if (!record(project) || typeof project.id !== "string" || typeof project.title !== "string") {
       throw new Error("T3 returned an invalid project shell.");
@@ -75,8 +74,7 @@ export function parseT3Shell(value: unknown, checkedAt: string): T3ShellSnapshot
   for (const thread of value.threads) {
     if (!record(thread) || typeof thread.id !== "string" || typeof thread.projectId !== "string" ||
         typeof thread.title !== "string" || typeof thread.updatedAt !== "string" ||
-        (v2 ? !runStatuses.has(String(thread.status))
-          : !("latestTurn" in thread && "session" in thread && "hasPendingApprovals" in thread))) {
+        !runStatuses.has(String(thread.status))) {
       throw new Error("T3 returned an invalid thread shell.");
     }
   }
@@ -86,11 +84,10 @@ export function parseT3Shell(value: unknown, checkedAt: string): T3ShellSnapshot
     .filter((item): item is string => item !== null)
     .sort().at(-1) ?? checkedAt;
   return {
-    snapshotSequence: value.snapshotSequence,
+    snapshotSequence: Number(value.snapshotSequence),
     projects: value.projects as T3ShellSnapshot["projects"],
-    threads: v2 ? threads.filter((thread) => thread.deletedAt == null &&
-      !(record(thread.lineage) && thread.lineage.relationshipToParent === "subagent")).map(v2Thread)
-      : value.threads as T3ThreadShell[],
+    threads: threads.filter((thread) => thread.deletedAt == null &&
+      !(record(thread.lineage) && thread.lineage.relationshipToParent === "subagent")).map(v2Thread),
     updatedAt,
   };
 }

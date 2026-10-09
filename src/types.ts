@@ -91,14 +91,14 @@ export interface BackendStatus {
   name: string;
   t3HttpUrl: string;
   watcher: WatcherConnection;
-  transport?: "stream" | "poll";
+  transport?: "stream";
   lastCheckedAt: string | null;
   error: string | null;
 }
 
 export interface WatcherSnapshot {
   watcher: WatcherConnection;
-  transport?: "stream" | "poll";
+  transport?: "stream";
   watcherName: string;
   sourceUpdatedAt: string | null;
   lastCheckedAt: string | null;

@@ -1,52 +1,73 @@
 import { expect, test } from "bun:test";
 import { WatcherAggregate } from "./aggregate.ts";
 import type { T3BackendConfig } from "./config.ts";
-import { DEMO_SHELL } from "./demo.ts";
-import { T3Poller } from "./poller.ts";
+import { T3Subscriber } from "./subscriber.ts";
 import { v2Shell } from "./test-fixtures.ts";
 
-test("mixed old/new backends isolate credentials and survive individual failures", async () => {
+test("streaming backends isolate credentials and preserve cached threads after individual failures", async () => {
   let offline = false;
   const servers = [1, 2].map((number) => Bun.serve({
     hostname: "127.0.0.1", port: 0,
-    fetch(request) {
-      if (new URL(request.url).pathname === "/.well-known/t3/environment") {
+    fetch(request, server) {
+      const path = new URL(request.url).pathname;
+      if (path === "/.well-known/t3/environment") {
         return Response.json({ environmentId: `env-${number}`, label: `Backend ${number}`,
-          serverVersion: number === 1 ? "0.0.45" : "0.0.46-nightly", orchestrationProtocolVersion: number });
+          serverVersion: "0.0.46-nightly.20261009.2886", orchestrationProtocolVersion: 2 });
       }
+      if (path === "/ws" && server.upgrade(request)) return;
       expect(request.headers.get("authorization")).toBe(`Bearer token-${number}`);
-      expect(request.headers.get("x-t3-orchestration-protocol")).toBe(String(number));
+      if (path === "/api/auth/websocket-ticket") return Response.json({ ticket: `ticket-${number}` });
+      expect(request.headers.get("x-t3-orchestration-protocol")).toBe("2");
       if (number === 2 && offline) return new Response("Denied", { status: 401 });
-      return Response.json(number === 1 ? DEMO_SHELL : v2Shell());
+      return Response.json(v2Shell());
     },
+    websocket: { message(ws, data) {
+      const request = JSON.parse(String(data));
+      if (request._tag === "Request") ws.send(JSON.stringify({ _tag: "Chunk", requestId: request.id,
+        values: [{ kind: "synchronized" }] }));
+      if (request._tag === "Ping") ws.send(JSON.stringify({ _tag: "Pong" }));
+    } },
   }));
   const backends: T3BackendConfig[] = servers.map((server, index) => ({
     id: `backend-${index + 1}`, t3HttpUrl: server.url.toString().replace(/\/$/, ""),
     bearerToken: `token-${index + 1}`, watcherName: null, webBaseUrl: null,
   }));
   const aggregate = new WatcherAggregate(backends);
-  const pollers = backends.map((backend) => new T3Poller({ ...backend,
-    backendId: backend.id, pollMs: 2_000, autoSettleAfterDays: null,
-    hostname: "127.0.0.1", port: 0, demo: false,
+  const subscribers = backends.map((backend) => new T3Subscriber({ ...backend,
+    autoSettleAfterDays: null, hostname: "127.0.0.1", port: 0, demo: false,
   }, aggregate.backendStores.get(backend.id)!));
+  const runs = subscribers.map((subscriber) => subscriber.connectOnce());
+  async function waitUntil(condition: () => boolean) {
+    const deadline = Date.now() + 2000;
+    while (!condition()) {
+      if (Date.now() >= deadline) throw new Error("Timed out waiting for backend state");
+      await Bun.sleep(5);
+    }
+  }
   try {
-    expect(aggregate.store.snapshot.watcher).toBe("connecting");
-    await Promise.all(pollers.map((poller) => poller.pollOnce()));
-    expect(aggregate.store.snapshot.watcher).toBe("live");
-    expect(aggregate.store.snapshot.threads).toHaveLength(4);
+    await waitUntil(() => aggregate.store.snapshot.watcher === "live");
+    expect(aggregate.store.snapshot.threads).toHaveLength(2);
     expect(aggregate.store.snapshot.backends?.map((backend) => backend.name)).toEqual(["Backend 1", "Backend 2"]);
     expect(aggregate.store.snapshot.threads.at(-1)).toMatchObject({ backendName: "Backend 2", status: "finished" });
+    subscribers[1]!.stop();
+    await runs[1];
     offline = true;
-    await Promise.all(pollers.map((poller) => poller.pollOnce()));
+    const reconnect = new T3Subscriber({ ...backends[1]!, autoSettleAfterDays: null,
+      hostname: "127.0.0.1", port: 0, demo: false }, aggregate.backendStores.get("backend-2")!);
+    await reconnect.connectOnce();
     expect(aggregate.store.snapshot.watcher).toBe("partial");
-    expect(aggregate.store.snapshot.threads).toHaveLength(4);
-    expect(aggregate.store.snapshot.threads.filter((thread) => thread.backendWatcher === "live")).toHaveLength(3);
+    expect(aggregate.store.snapshot.threads).toHaveLength(2);
+    expect(aggregate.store.snapshot.threads.filter((thread) => thread.backendWatcher === "live")).toHaveLength(1);
     expect(aggregate.store.snapshot.error).toContain("Backend 2");
     offline = false;
-    await pollers[1]!.pollOnce();
-    expect(aggregate.store.snapshot.watcher).toBe("live");
+    const recovered = reconnect.connectOnce();
+    await waitUntil(() => aggregate.store.snapshot.watcher === "live");
     expect(aggregate.store.snapshot.error).toBeNull();
+    reconnect.stop();
+    await recovered;
   } finally {
+    subscribers.forEach((subscriber) => subscriber.stop());
+    await Promise.all(runs);
     aggregate.stop();
     await Promise.all(servers.map((server) => server.stop(true)));
   }

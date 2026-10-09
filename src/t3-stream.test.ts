@@ -2,14 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { T3ShellProjection, subscribeT3Shell } from "./t3-stream.ts";
 import { v2Shell } from "./test-fixtures.ts";
 import { parseT3Shell } from "./t3-shell.ts";
-import { T3Poller } from "./poller.ts";
+import { T3Subscriber } from "./subscriber.ts";
 import { WatcherStore } from "./store.ts";
 import type { WatcherConfig } from "./config.ts";
-import { DEMO_SHELL } from "./demo.ts";
 
 const status = (shell: unknown) => parseT3Shell(shell, new Date().toISOString()).threads[0]?.watcherStatus;
 const configFor = (url: URL): WatcherConfig => ({ t3HttpUrl: url.toString().replace(/\/$/, ""),
-  bearerToken: "test-token", watcherName: null, pollMs: 25, autoSettleAfterDays: null,
+  bearerToken: "test-token", watcherName: null, autoSettleAfterDays: null,
   hostname: "127.0.0.1", port: 0, webBaseUrl: null, demo: false });
 
 async function waitUntil(condition: () => boolean) {
@@ -127,7 +126,7 @@ test("a silent connection times out and releases the socket", async () => {
   } finally { await server.stop(true); }
 });
 
-test("the poller streams without repeated HTTP snapshots, falls back after disconnection, and reconnects", async () => {
+test("the subscriber stays cached after disconnection and bootstraps once on reconnect", async () => {
   let shellRequests = 0;
   let subscriptions = 0;
   let closedConnections = 0;
@@ -153,8 +152,8 @@ test("the poller streams without repeated HTTP snapshots, falls back after disco
     }, close() { closedConnections++; } },
   });
   const store = new WatcherStore("T3");
-  const poller = new T3Poller(configFor(server.url), store, { streamRetryMs: 200 });
-  const run = poller.start();
+  const subscriber = new T3Subscriber(configFor(server.url), store, { retryMs: 200 });
+  const run = subscriber.start();
   try {
     await waitUntil(() => store.snapshot.transport === "stream");
     await Bun.sleep(80);
@@ -162,16 +161,19 @@ test("the poller streams without repeated HTTP snapshots, falls back after disco
     expect(subscriptions).toBe(1);
     allowSocket = false;
     activeSocket!.close();
-    await waitUntil(() => store.snapshot.transport === "poll" && shellRequests >= 2);
+    await waitUntil(() => store.snapshot.watcher === "stale");
+    const cachedThreads = store.snapshot.threads;
     await Bun.sleep(60);
-    expect(store.snapshot.watcher).toBe("live");
-    expect(shellRequests).toBeGreaterThan(2);
+    expect(store.snapshot.watcher).toBe("stale");
+    expect(store.snapshot.threads).toEqual(cachedThreads);
+    expect(shellRequests).toBe(1);
     expect(subscriptions).toBe(1);
     allowSocket = true;
-    await waitUntil(() => subscriptions === 2 && store.snapshot.transport === "stream");
+    await waitUntil(() => subscriptions === 2 && store.snapshot.watcher === "live");
+    expect(shellRequests).toBe(2);
     expect(store.snapshot.watcher).toBe("live");
   } finally {
-    poller.stop();
+    subscriber.stop();
     await run;
     await waitUntil(() => closedConnections === subscriptions);
     // Bun 1.3.14 can retain its pendingWebSockets counter after server-initiated
@@ -180,27 +182,7 @@ test("the poller streams without repeated HTTP snapshots, falls back after disco
   }
 });
 
-test("legacy protocol stays on polling without attempting WebSocket authentication", async () => {
-  let unexpectedRequests = 0;
-  let shellRequests = 0;
-  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
-    const path = new URL(request.url).pathname;
-    if (path === "/.well-known/t3/environment") return Response.json({ environmentId: "old", label: "Stable", serverVersion: "stable", orchestrationProtocolVersion: 1 });
-    if (path === "/api/orchestration/shell") { shellRequests++; return Response.json(DEMO_SHELL); }
-    unexpectedRequests++;
-    return new Response("Unsupported", { status: 404 });
-  } });
-  const store = new WatcherStore("Stable");
-  const poller = new T3Poller(configFor(server.url), store);
-  const run = poller.start();
-  try {
-    await waitUntil(() => shellRequests >= 3);
-    expect(store.snapshot.transport).toBe("poll");
-    expect(unexpectedRequests).toBe(0);
-  } finally { poller.stop(); await run; await server.stop(true); }
-});
-
-test("denied streaming tickets fall back to HTTP without repeated ticket requests", async () => {
+test("denied streaming tickets never publish the bootstrap as live or poll it", async () => {
   let ticketRequests = 0;
   let shellRequests = 0;
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
@@ -211,14 +193,18 @@ test("denied streaming tickets fall back to HTTP without repeated ticket request
     return new Response("Not found", { status: 404 });
   } });
   const store = new WatcherStore("T3");
-  const poller = new T3Poller(configFor(server.url), store);
-  const run = poller.start();
+  const subscriber = new T3Subscriber(configFor(server.url), store);
+  const run = subscriber.start();
   try {
-    await waitUntil(() => shellRequests >= 3);
-    expect(store.snapshot.watcher).toBe("live");
-    expect(store.snapshot.transport).toBe("poll");
+    await waitUntil(() => store.snapshot.watcher === "error");
+    await Bun.sleep(80);
+    expect(store.snapshot.watcher).toBe("error");
+    expect(store.snapshot.transport).toBeUndefined();
+    expect(store.snapshot.threads).toEqual([]);
+    expect(store.snapshot.error).toContain("403");
+    expect(shellRequests).toBe(1);
     expect(ticketRequests).toBe(1);
-  } finally { poller.stop(); await run; await server.stop(true); }
+  } finally { subscriber.stop(); await run; await server.stop(true); }
 });
 
 test("stopping cancels an in-flight descriptor request without publishing stale state", async () => {
@@ -228,12 +214,12 @@ test("stopping cancels an in-flight descriptor request without publishing stale 
     return new Promise<Response>(() => {});
   } });
   const store = new WatcherStore("T3");
-  const poller = new T3Poller(configFor(server.url), store);
-  const run = poller.start();
+  const subscriber = new T3Subscriber(configFor(server.url), store);
+  const run = subscriber.start();
   try {
     await waitUntil(() => requested);
-    poller.stop();
+    subscriber.stop();
     await run;
     expect(store.snapshot.watcher).toBe("connecting");
-  } finally { poller.stop(); void server.stop(true); }
+  } finally { subscriber.stop(); void server.stop(true); }
 });

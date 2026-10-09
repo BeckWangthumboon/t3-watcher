@@ -154,21 +154,21 @@ test("the pets rename preserves legacy profiles and prefers the new directory", 
     await saveT3Connection({ t3HttpUrl: "http://legacy:3773", label: "Legacy", bearerToken: "legacy-token" }, legacyDir);
     await saveT3Connection({ t3HttpUrl: "http://remote:3773", bearerToken: "remote-token" },
       namedBackendDirectory("remote", legacyDir));
-    const legacy = await readConfig(directory, { HOME: directory, WATCHER_POLL_MS: "3000" });
+    const legacy = await readConfig(directory, { HOME: directory, WATCHER_HOST: "localhost" });
     expect(legacy.backends?.map(({ id, bearerToken }) => ({ id, bearerToken }))).toEqual([
       { id: "default", bearerToken: "legacy-token" },
       { id: "remote", bearerToken: "remote-token" },
     ]);
-    expect(legacy.pollMs).toBe(3000);
+    expect(legacy.hostname).toBe("localhost");
 
     const petsDir = join(directory, ".t3-pets");
     await saveT3Connection({ t3HttpUrl: "http://pets:3773", bearerToken: "pets-token" }, petsDir);
     const current = await readConfig(directory, { HOME: directory,
-      T3_PETS_POLL_MS: "1000", WATCHER_POLL_MS: "3000" });
+      T3_PETS_HOST: "127.0.0.2", WATCHER_HOST: "localhost" });
     expect(current.t3HttpUrl).toBe("http://pets:3773");
     expect(current.bearerToken).toBe("pets-token");
     expect(current.backends).toHaveLength(1);
-    expect(current.pollMs).toBe(1000);
+    expect(current.hostname).toBe("127.0.0.2");
 
     const override = await readConfig(directory, { HOME: directory,
       T3_PETS_CONFIG_DIR: legacyDir, WATCHER_CONFIG_DIR: petsDir });

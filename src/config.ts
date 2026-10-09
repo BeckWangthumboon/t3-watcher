@@ -20,7 +20,6 @@ export interface WatcherConfig {
   t3HttpUrl: string;
   bearerToken: string | null;
   watcherName: string | null;
-  pollMs: number;
   autoSettleAfterDays: number | null;
   hostname: string;
   port: number;
@@ -85,7 +84,6 @@ export async function loadConfig(): Promise<WatcherConfig> {
     ).replace(/\/$/, ""),
     bearerToken: useDefault ? await readToken(configDir) : null,
     watcherName: (Bun.env.T3_PETS_NAME ?? Bun.env.WATCHER_NAME)?.trim() || savedConnection?.label || null,
-    pollMs: positiveInteger((Bun.env.T3_PETS_POLL_MS ?? Bun.env.WATCHER_POLL_MS), 2_000),
     autoSettleAfterDays,
     hostname: (Bun.env.T3_PETS_HOST ?? Bun.env.WATCHER_HOST)?.trim() || "127.0.0.1",
     port: positiveInteger(Bun.env.PORT, 4_173),

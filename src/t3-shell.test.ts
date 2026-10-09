@@ -12,8 +12,8 @@ function normalized(overrides: Record<string, unknown> = {}) {
   });
 }
 
-test("the legacy stable shell remains supported", () => {
-  expect(parseT3Shell(DEMO_SHELL, checkedAt)).toEqual(DEMO_SHELL);
+test("rejects the legacy stable shell", () => {
+  expect(() => parseT3Shell(DEMO_SHELL, checkedAt)).toThrow("invalid shell");
 });
 
 describe("protocol-2 shell", () => {

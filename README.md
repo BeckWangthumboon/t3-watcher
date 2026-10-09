@@ -24,7 +24,7 @@ Requirements:
 - macOS 13 or newer;
 - Bun;
 - Swift 6 toolchain;
-- a running T3 Code server.
+- T3 Code nightly **`0.0.46-nightly.20261009.2886` or newer with orchestration protocol 2**, on every backend.
 
 Install dependencies and start the service:
 
@@ -110,11 +110,11 @@ Threads show their backend label in the Mac menu and web dashboard. Connection a
 
 ## T3 version compatibility
 
-Protocol-2 backends use the live `orchestration.subscribeShell` WebSocket subscription. T3 Pets loads one HTTP snapshot, catches up from its sequence, and then reacts to streamed changes. The socket uses a short-lived authentication ticket and the existing `orchestration:read` permission. Heartbeats check connectivity and keep time-based status counts current.
+T3 Pets requires **T3 Code nightly `0.0.46-nightly.20261009.2886` or newer with orchestration protocol 2**. This is the tested baseline for both local and remote backends. Only this API is maintained; older releases such as stable `v0.0.45`, missing protocol advertisements, and other protocol versions produce an explicit connection error. Update every connected T3 Code backend before using T3 Pets.
 
-Older backends use HTTP polling. If streaming disconnects, T3 Pets keeps cached data visible, resumes polling, and retries the live subscription every 30 seconds with a fresh snapshot. Initial state and reconnect catch-up do not replay historical pet reactions. Each backend chooses its own transport; `/api/health` reports `transport: "stream"` or `"poll"` for each backend.
+The service uses the live `orchestration.subscribeShell` WebSocket subscription. At each connection it loads one HTTP snapshot with `x-t3-orchestration-protocol: 2`, catches up from its sequence, and then reacts to streamed changes. The socket uses a short-lived authentication ticket and the existing `orchestration:read` permission. Heartbeats check connectivity and keep time-based status counts current.
 
-T3 Pets supports the legacy shell used by stable T3 `v0.0.45` (protocol 1 when advertised) and the protocol-2 shell introduced in October 2026 nightlies. Protocol-2 requests include `x-t3-orchestration-protocol: 2`; runs, runtime requests, and background work are adapted into pet states. Unsupported future protocols produce an explicit connection error.
+There is no polling fallback. If streaming disconnects, cached data stays visible and the backend is marked unavailable until its stream reconnects. The service retries every 30 seconds with a fresh bootstrap snapshot and does not mark a backend live until catch-up finishes. Initial state and reconnect catch-up do not replay historical pet reactions. `/api/health` reports `transport: "stream"` for connected backends.
 
 Background subagents and monitors show **Waiting on background work**, while a command left running (such as a dev server) allows the completed run to show **Finished**. Usage limits need attention. Subagent child threads, deleted threads, and currently snoozed threads are excluded; pinned threads and threads with automatic settlement disabled remain visible.
 
@@ -134,7 +134,6 @@ Copy `.env.example` to `.env` or set environment variables in the service manage
 | `T3_BEARER_TOKEN` | Inline upstream token | none |
 | `T3_BEARER_TOKEN_FILE` | Upstream token file | `~/.t3-pets/token` when present |
 | `T3_PETS_NAME` | Display-name override | T3's advertised environment label |
-| `T3_PETS_POLL_MS` | Polling interval for legacy backends and streaming fallback | `2000` |
 | `T3_PETS_AUTO_SETTLE_DAYS` | Hide inactive finished threads, or `never` | `3` |
 | `T3_PETS_HOST` | Service bind address | `127.0.0.1` |
 | `PORT` | Service port | `4173` |

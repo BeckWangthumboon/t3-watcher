@@ -1,6 +1,6 @@
 import { loadConfig } from "./config.ts";
 import { DEMO_SHELL } from "./demo.ts";
-import { T3Poller } from "./poller.ts";
+import { T3Subscriber } from "./subscriber.ts";
 import { normalizeShell } from "./state.ts";
 import { WatcherStore } from "./store.ts";
 import type { WatcherSnapshot } from "./types.ts";
@@ -10,7 +10,7 @@ const config = await loadConfig();
 const backends = config.backends ?? [{ ...config, id: "default" }];
 const aggregate = config.demo ? null : new WatcherAggregate(backends);
 const store = aggregate?.store ?? new WatcherStore(config.watcherName ?? "T3 Code");
-const pollers: T3Poller[] = [];
+const subscribers: T3Subscriber[] = [];
 
 if (config.demo) {
   store.set({
@@ -27,10 +27,10 @@ if (config.demo) {
   });
 } else {
   for (const backend of backends) {
-    const poller = new T3Poller({ ...config, ...backend, backendId: backend.id },
+    const subscriber = new T3Subscriber({ ...config, ...backend },
       aggregate!.backendStores.get(backend.id)!);
-    pollers.push(poller);
-    void poller.start();
+    subscribers.push(subscriber);
+    void subscriber.start();
   }
 }
 
@@ -108,7 +108,7 @@ const server = Bun.serve({
 console.log(`T3 Pets listening on ${server.url}`);
 
 function shutdown(): void {
-  for (const poller of pollers) poller.stop();
+  for (const subscriber of subscribers) subscriber.stop();
   aggregate?.stop();
   void server.stop(true);
 }
