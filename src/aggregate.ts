@@ -56,7 +56,7 @@ export class WatcherAggregate {
       threads: [...threads.values()],
       backends: states.map(({ backend, snapshot }) => ({
         id: backend.id, name: snapshot.watcherName, t3HttpUrl: backend.t3HttpUrl,
-        watcher: snapshot.watcher, lastCheckedAt: snapshot.lastCheckedAt, error: snapshot.error,
+        watcher: snapshot.watcher, transport: snapshot.transport, lastCheckedAt: snapshot.lastCheckedAt, error: snapshot.error,
       })),
     });
   }

@@ -116,10 +116,11 @@ export function parseT3PairingUrl(value: string): { t3HttpUrl: string; credentia
 export async function fetchT3Descriptor(
   t3HttpUrl: string,
   fetcher: typeof fetch = fetch,
+  signal?: AbortSignal,
 ): Promise<T3EnvironmentDescriptor> {
   const response = await fetcher(`${normalizeHttpUrl(t3HttpUrl)}/.well-known/t3/environment`, {
     headers: { accept: "application/json" },
-    signal: AbortSignal.timeout(3_000),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(3_000)]) : AbortSignal.timeout(3_000),
   });
   if (!response.ok) throw new Error(`T3 environment descriptor returned ${response.status}.`);
   const value: unknown = await response.json();

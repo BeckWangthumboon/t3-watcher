@@ -10,7 +10,7 @@ Install the latest code from [BeckWangthumboon/t3-pets](https://github.com/BeckW
 
 T3 Pets has two small pieces:
 
-1. The Bun service reads the orchestration shells from one or more T3 Code environments and exposes a normalized, read-only event stream.
+1. The Bun service subscribes to live thread changes from one or more T3 Code environments and exposes a normalized, read-only event stream to the pet app.
 2. The macOS app connects to that service from the same Mac, a LAN address, or a private network such as Tailscale.
 
 The service follows T3 Code's connection model. It verifies `/.well-known/t3/environment`, accepts a normal T3 pairing URL, and exchanges the one-time pairing credential for a bearer token scoped only to `orchestration:read`.
@@ -106,9 +106,13 @@ An existing default `~/.t3-pets/connection.json` remains included alongside name
 
 Restart the service after adding, re-pairing, or removing a backend. Reusing `--name` replaces only that backend's profile. To remove one, delete its directory under `backends` and restart.
 
-Threads show their backend label in the Mac menu and web dashboard. Polling and authentication errors are isolated per backend. A partly connected service keeps live backends updating, marks unavailable backends' threads as cached, and adds a `?` beside the live menu-bar status. Cached threads do not trigger pet transitions.
+Threads show their backend label in the Mac menu and web dashboard. Connection and authentication errors are isolated per backend. A partly connected service keeps live backends updating, marks unavailable backends' threads as cached, and adds a `?` beside the live menu-bar status. Cached threads do not trigger pet transitions.
 
 ## T3 version compatibility
+
+Protocol-2 backends use the live `orchestration.subscribeShell` WebSocket subscription. T3 Pets loads one HTTP snapshot, catches up from its sequence, and then reacts to streamed changes. The socket uses a short-lived authentication ticket and the existing `orchestration:read` permission. Heartbeats check connectivity and keep time-based status counts current.
+
+Older backends use HTTP polling. If streaming disconnects, T3 Pets keeps cached data visible, resumes polling, and retries the live subscription every 30 seconds with a fresh snapshot. Initial state and reconnect catch-up do not replay historical pet reactions. Each backend chooses its own transport; `/api/health` reports `transport: "stream"` or `"poll"` for each backend.
 
 T3 Pets supports the legacy shell used by stable T3 `v0.0.45` (protocol 1 when advertised) and the protocol-2 shell introduced in October 2026 nightlies. Protocol-2 requests include `x-t3-orchestration-protocol: 2`; runs, runtime requests, and background work are adapted into pet states. Unsupported future protocols produce an explicit connection error.
 
@@ -130,7 +134,7 @@ Copy `.env.example` to `.env` or set environment variables in the service manage
 | `T3_BEARER_TOKEN` | Inline upstream token | none |
 | `T3_BEARER_TOKEN_FILE` | Upstream token file | `~/.t3-pets/token` when present |
 | `T3_PETS_NAME` | Display-name override | T3's advertised environment label |
-| `T3_PETS_POLL_MS` | Upstream polling interval | `2000` |
+| `T3_PETS_POLL_MS` | Polling interval for legacy backends and streaming fallback | `2000` |
 | `T3_PETS_AUTO_SETTLE_DAYS` | Hide inactive finished threads, or `never` | `3` |
 | `T3_PETS_HOST` | Service bind address | `127.0.0.1` |
 | `PORT` | Service port | `4173` |
