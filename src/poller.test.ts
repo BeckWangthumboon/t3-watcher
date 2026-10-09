@@ -49,7 +49,7 @@ test("descriptor failures preserve thread identity, and auth failures preserve c
     shellStatus = 401;
     await poller.pollOnce();
     expect(store.snapshot.watcher).toBe("stale");
-    expect(store.snapshot.error).toContain("pair T3 Watcher again");
+    expect(store.snapshot.error).toContain("pair T3 Pets again");
     expect(store.snapshot.threads).toEqual(threads);
     shellStatus = 403;
     await poller.pollOnce();

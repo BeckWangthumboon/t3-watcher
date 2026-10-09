@@ -102,7 +102,7 @@ function render(snapshot) {
   };
   connectionLabelElement.textContent = connectionLabels[snapshot.watcher];
   staleBannerElement.hidden = !["partial", "stale", "error"].includes(snapshot.watcher);
-  staleDetailElement.textContent = snapshot.error || "The watcher cannot reach T3 right now.";
+  staleDetailElement.textContent = snapshot.error || "T3 Pets cannot reach T3 right now.";
 
   if (snapshot.lastCheckedAt) {
     lastUpdatedElement.textContent = `Checked ${relativeTime(snapshot.lastCheckedAt)}`;
@@ -159,7 +159,7 @@ events.onerror = () => {
   connectionElement.dataset.state = "stale";
   connectionLabelElement.textContent = "Reconnecting";
   staleBannerElement.hidden = false;
-  staleDetailElement.textContent = "The browser lost contact with the watcher.";
+  staleDetailElement.textContent = "The browser lost contact with T3 Pets.";
 };
 
 setInterval(() => {

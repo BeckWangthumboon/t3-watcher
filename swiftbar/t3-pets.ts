@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// <xbar.title>T3 Watcher</xbar.title>
+// <xbar.title>T3 Pets</xbar.title>
 // <xbar.version>v0.1.0</xbar.version>
 // <xbar.author>Beck</xbar.author>
 // <xbar.desc>Live unsettled T3 thread status.</xbar.desc>
@@ -38,21 +38,7 @@ interface WatcherSnapshot {
   threads: WatchedThread[];
 }
 
-export interface StatusTransition {
-  thread: WatchedThread;
-  previousStatus: WatchedThread["status"] | null;
-}
-
-const DEFAULT_WATCHER_URL = "http://127.0.0.1:4173";
-const watcherUrl = (Bun.env.T3_WATCHER_URL || DEFAULT_WATCHER_URL).replace(/\/$/, "");
-const noteworthyStatuses = new Set<WatchedThread["status"]>([
-  "approval",
-  "input",
-  "plan_ready",
-  "failed",
-  "limited",
-  "finished",
-]);
+const serviceUrl = (Bun.env.T3_PETS_URL || Bun.env.T3_WATCHER_URL || "http://127.0.0.1:4173").replace(/\/$/, "");
 
 const statusLabels: Record<WatchedThread["status"], string> = {
   approval: "Approval needed",
@@ -134,7 +120,7 @@ function menuTitle(snapshot: WatcherSnapshot): string {
 }
 
 export function renderSwiftBar(snapshot: WatcherSnapshot): string {
-  const lines = [`${menuTitle(snapshot)} | sfimage=eye ansi=true`, "---", "T3 Watcher"];
+  const lines = [`${menuTitle(snapshot)} | sfimage=eye ansi=true`, "---", "T3 Pets"];
   const connectionLabel =
     snapshot.watcher === "partial" ? `Partly connected · ${safeText(snapshot.watcherName)}`
       : snapshot.watcher === "live"
@@ -169,24 +155,6 @@ export function renderSwiftBar(snapshot: WatcherSnapshot): string {
   return lines.join("\n");
 }
 
-export function findStatusTransitions(
-  previous: ReadonlyMap<string, WatchedThread["status"]>,
-  snapshot: WatcherSnapshot,
-  initialized: boolean,
-): StatusTransition[] {
-  if (!initialized) return [];
-  if (!["live", "partial"].includes(snapshot.watcher)) return [];
-  const transitions: StatusTransition[] = [];
-  for (const thread of snapshot.threads) {
-    const previousStatus = previous.get(thread.key) ?? null;
-    if (thread.backendWatcher && thread.backendWatcher !== "live") continue;
-    if (previousStatus !== null && previousStatus !== thread.status && noteworthyStatuses.has(thread.status)) {
-      transitions.push({ thread, previousStatus });
-    }
-  }
-  return transitions;
-}
-
 export function parseSseBlocks(input: string): {
   snapshots: WatcherSnapshot[];
   remainder: string;
@@ -205,35 +173,13 @@ export function parseSseBlocks(input: string): {
     try {
       snapshots.push(JSON.parse(data) as WatcherSnapshot);
     } catch {
-      console.error("T3 Watcher: ignored malformed SSE data");
+      console.error("T3 Pets: ignored malformed SSE data");
     }
   }
   return { snapshots, remainder };
 }
 
-async function sendNotification(transition: StatusTransition): Promise<void> {
-  const params = new URLSearchParams({
-    name: "t3-watcher",
-    title: statusLabels[transition.thread.status],
-    subtitle: transition.thread.projectTitle || "T3 Code",
-    body: transition.thread.title,
-  });
-  const process = Bun.spawn(["/usr/bin/open", "-g", `swiftbar://notify?${params}`], {
-    stdout: "ignore",
-    stderr: "ignore",
-  });
-  await process.exited;
-}
-
-function statusMap(snapshot: WatcherSnapshot): Map<string, WatchedThread["status"]> {
-  if (!["live", "partial"].includes(snapshot.watcher)) return new Map();
-  return new Map(snapshot.threads.filter((thread) => !thread.backendWatcher || thread.backendWatcher === "live")
-    .map((thread) => [thread.key, thread.status]));
-}
-
 async function run(): Promise<never> {
-  let previous = new Map<string, WatchedThread["status"]>();
-  let initialized = false;
   let lastSnapshot: WatcherSnapshot | null = null;
   let lastRendered: string | null = null;
   let emitted = false;
@@ -257,7 +203,7 @@ async function run(): Promise<never> {
 
   while (true) {
     try {
-      const response = await fetch(`${watcherUrl}/api/events`, {
+      const response = await fetch(`${serviceUrl}/api/events`, {
         headers: { accept: "text/event-stream" },
       });
       if (!response.ok || response.body === null) {
@@ -274,16 +220,11 @@ async function run(): Promise<never> {
         const parsed = parseSseBlocks(buffer);
         buffer = parsed.remainder;
         for (const snapshot of parsed.snapshots) {
-          const transitions = findStatusTransitions(previous, snapshot, initialized);
-          for (const transition of transitions) void sendNotification(transition);
-          previous = statusMap(snapshot);
-          initialized = true;
           lastSnapshot = snapshot;
           emit(snapshot);
         }
       }
     } catch (error) {
-      previous.clear();
       const message = error instanceof Error ? error.message : "Could not reach watcher";
       const stale: WatcherSnapshot = lastSnapshot
         ? { ...lastSnapshot, watcher: "stale", error: message }

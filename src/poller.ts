@@ -35,7 +35,7 @@ export class T3Poller {
       const environment = await this.resolveEnvironment();
       if (environment.orchestrationProtocolVersion !== undefined &&
           ![1, 2].includes(environment.orchestrationProtocolVersion)) {
-        throw new Error(`Unsupported T3 orchestration protocol ${environment.orchestrationProtocolVersion}; update T3 Watcher.`);
+        throw new Error(`Unsupported T3 orchestration protocol ${environment.orchestrationProtocolVersion}; update T3 Pets.`);
       }
       // Older servers ignore this header; protocol-2 servers require it.
       const headers = new Headers({ accept: "application/json",
@@ -48,10 +48,10 @@ export class T3Poller {
         signal: AbortSignal.timeout(6_000),
       });
       if (response.status === 401) {
-        throw new Error("T3 access expired or was revoked; pair T3 Watcher again.");
+        throw new Error("T3 access expired or was revoked; pair T3 Pets again.");
       }
       if (response.status === 403) {
-        throw new Error("T3 Watcher does not have orchestration:read access.");
+        throw new Error("T3 Pets does not have orchestration:read access.");
       }
       if (!response.ok) {
         throw new Error(`T3 shell request returned ${response.status}`);

@@ -1,12 +1,12 @@
 [Unit]
-Description=T3 Watcher service
+Description=T3 Pets service
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/.local/share/t3-watcher
-Environment=WATCHER_HOST=127.0.0.1
+WorkingDirectory=%h/.local/share/t3-pets
+Environment=T3_PETS_HOST=127.0.0.1
 Environment=PORT=4173
 ExecStart=%h/.bun/bin/bun src/server.ts
 Restart=on-failure

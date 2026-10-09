@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { chmod, mkdir, readdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, stat, writeFile } from "node:fs/promises";
 
 export interface T3EnvironmentDescriptor {
   environmentId: string;
@@ -21,7 +21,22 @@ export interface SavedT3Connection {
   label?: string;
 }
 
-export const DEFAULT_CONFIG_DIR = join(homedir(), ".t3-watcher");
+export const DEFAULT_CONFIG_DIR = join(homedir(), ".t3-pets");
+
+/** Existing installs keep their complete profile set and its matching credentials. */
+export async function resolveConfigDirectory(homeDirectory = homedir()): Promise<string> {
+  const explicit = Bun.env.T3_PETS_CONFIG_DIR?.trim() || Bun.env.WATCHER_CONFIG_DIR?.trim();
+  if (explicit) return explicit;
+  const current = join(homeDirectory, ".t3-pets");
+  for (const directory of [current, join(homeDirectory, ".t3-watcher")]) {
+    try {
+      if ((await stat(directory)).isDirectory()) return directory;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  return current;
+}
 export const DEFAULT_CONNECTION_FILE = join(DEFAULT_CONFIG_DIR, "connection.json");
 export const DEFAULT_TOKEN_FILE = join(DEFAULT_CONFIG_DIR, "token");
 export const LEGACY_CONNECTION_FILE = ".watcher-connection.json";
@@ -136,7 +151,7 @@ export async function exchangeT3PairingUrl(
     subject_token_type: "urn:t3:params:oauth:token-type:environment-bootstrap",
     requested_token_type: "urn:ietf:params:oauth:token-type:access_token",
     scope: "orchestration:read",
-    client_label: "T3 Watcher",
+    client_label: "T3 Pets",
     client_device_type: "bot",
   });
   const response = await fetcher(`${t3HttpUrl}/oauth/token`, {
@@ -211,7 +226,7 @@ export async function discoverLocalT3HttpUrl(options: {
 export async function readSavedT3Connection(
   path?: string,
 ): Promise<SavedT3Connection | null> {
-  const candidates = path ? [path] : [DEFAULT_CONNECTION_FILE, LEGACY_CONNECTION_FILE];
+  const candidates = path ? [path] : [join(await resolveConfigDirectory(), "connection.json"), LEGACY_CONNECTION_FILE];
   for (const candidatePath of candidates) {
     const file = Bun.file(candidatePath);
     if (!(await file.exists())) continue;

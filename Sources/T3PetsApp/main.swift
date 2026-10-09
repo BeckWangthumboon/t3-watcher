@@ -1,6 +1,5 @@
 import AppKit
 import Foundation
-import UserNotifications
 
 struct WatcherSnapshot: Codable {
   let watcher: String
@@ -106,7 +105,7 @@ struct WatcherSummary {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate {
   private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
   private let t3CodeURL = URL(fileURLWithPath: "/Applications/T3 Code (Nightly).app")
   private var petOverlay: PetOverlayController!
@@ -114,14 +113,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   private var previousStatuses: [String: String] = [:]
   private var hasLoadedSnapshot = false
   private var snapshot: WatcherSnapshot?
-  private var notificationsEnabled: Bool {
-    UserDefaults.standard.object(forKey: "threadNotificationsEnabled") as? Bool ?? true
-  }
-  private var watcherURL: URL = {
+  private var serviceURL: URL = {
     let candidates = [
-      UserDefaults.standard.string(forKey: "watcherURL"),
+      UserDefaults.standard.string(forKey: "serviceURL"),
+      ProcessInfo.processInfo.environment["T3_PETS_URL"],
       ProcessInfo.processInfo.environment["T3_WATCHER_URL"],
-      Bundle.main.object(forInfoDictionaryKey: "T3WatcherURL") as? String,
+      Bundle.main.object(forInfoDictionaryKey: "T3PetsURL") as? String,
       "http://127.0.0.1:4173",
     ]
     return candidates.compactMap { value in
@@ -132,8 +129,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   func applicationDidFinishLaunching(_ notification: Notification) {
     petOverlay = PetOverlayController()
     configureStatusItem()
-    UNUserNotificationCenter.current().delegate = self
-    if notificationsEnabled { Self.requestNotificationPermission() }
     connect()
   }
 
@@ -144,10 +139,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   private func configureStatusItem() {
     guard let button = statusItem.button else { return }
     button.image = WatcherMark.image()
-    button.image?.accessibilityDescription = "T3 Watcher"
+    button.image?.accessibilityDescription = "T3 Pets"
     button.imagePosition = .imageLeading
     button.imageScaling = .scaleProportionallyDown
-    button.toolTip = "T3 Watcher"
+    button.toolTip = "T3 Pets"
     showConnecting()
   }
 
@@ -155,15 +150,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     statusItem.button?.image = WatcherMark.image()
     statusItem.button?.attributedTitle = NSAttributedString(string: " …")
     let menu = NSMenu()
-    menu.addItem(disabledItem("T3 Watcher"))
+    menu.addItem(disabledItem("T3 Pets"))
     menu.addItem(
       disabledItem(
-        "Connecting to \(watcherURL.host ?? watcherURL.absoluteString)…",
+        "Connecting to \(serviceURL.host ?? serviceURL.absoluteString)…",
         color: .secondaryLabelColor
       )
     )
     menu.addItem(.separator())
-    menu.addItem(configureWatcherItem())
+    menu.addItem(configureServiceItem())
     menu.addItem(quitItem())
     statusItem.menu = menu
   }
@@ -181,7 +176,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
           return
         } catch {
           guard !Task.isCancelled else { return }
-          NSLog("T3 Watcher connection failed: %@", error.localizedDescription)
+          NSLog("T3 Pets connection failed: %@", error.localizedDescription)
           self.showDisconnected(error.localizedDescription)
           try? await Task.sleep(for: .seconds(delay))
           delay = min(delay * 2, 30)
@@ -191,13 +186,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   }
 
   private func consumeEvents() async throws {
-    let eventsURL = watcherURL.appending(path: "api/events")
+    let eventsURL = serviceURL.appending(path: "api/events")
     let (bytes, response) = try await URLSession.shared.bytes(from: eventsURL)
     try Task.checkCancellation()
     guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
       throw URLError(.badServerResponse)
     }
-    NSLog("T3 Watcher connected to %@", eventsURL.absoluteString)
+    NSLog("T3 Pets connected to %@", eventsURL.absoluteString)
 
     var eventBuffer = Data()
     for try await byte in bytes {
@@ -217,7 +212,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   }
 
   private func apply(_ next: WatcherSnapshot) {
-    NSLog("T3 Watcher received %d unsettled threads", next.threads.count)
+    NSLog("T3 Pets received %d unsettled threads", next.threads.count)
     UserDefaults.standard.set(next.threads.count, forKey: "lastThreadCount")
     UserDefaults.standard.set(Date(), forKey: "lastSnapshotAt")
     UserDefaults.standard.set(next.watcher, forKey: "lastWatcherState")
@@ -225,38 +220,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     let petTransition = hasLoadedSnapshot
       ? summary.transitionAnimation(from: previousStatuses)
       : nil
-    notifyTransitions(in: next)
+    let liveThreads = ["live", "partial"].contains(next.watcher)
+      ? next.threads.filter { $0.isLive } : []
+    previousStatuses = Dictionary(uniqueKeysWithValues: liveThreads.map { ($0.key, $0.status) })
+    hasLoadedSnapshot = true
     snapshot = next
     petOverlay.update(summary: summary, transition: petTransition)
     render(next, summary: summary)
-  }
-
-  private func notifyTransitions(in next: WatcherSnapshot) {
-    let liveThreads = ["live", "partial"].contains(next.watcher)
-      ? next.threads.filter { $0.isLive } : []
-    if hasLoadedSnapshot && notificationsEnabled {
-      for thread in liveThreads {
-        guard let previous = previousStatuses[thread.key], previous != thread.status else { continue }
-        guard ["approval", "input", "plan_ready", "failed", "limited", "finished"].contains(thread.status) else {
-          continue
-        }
-        let content = UNMutableNotificationContent()
-        content.title = notificationTitle(for: thread.status)
-        content.body = "\(thread.title) · \(thread.context)"
-        content.sound = .default
-        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
-      }
-    }
-    previousStatuses = Dictionary(uniqueKeysWithValues: liveThreads.map { ($0.key, $0.status) })
-    hasLoadedSnapshot = true
   }
 
   private func render(_ snapshot: WatcherSnapshot, summary: WatcherSummary? = nil) {
     let summary = summary ?? WatcherSummary(snapshot: snapshot)
     renderTitle(snapshot, summary: summary)
     let menu = NSMenu()
-    menu.addItem(disabledItem("T3 Watcher"))
+    menu.addItem(disabledItem("T3 Pets"))
     let connection = snapshot.watcher == "partial" ? "Partly connected · \(snapshot.watcherName)"
       : snapshot.watcher == "live"
       ? "Live · \(snapshot.watcherName)"
@@ -291,22 +268,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
     menu.addItem(.separator())
     addPetControls(to: menu)
-    let notificationToggle = NSMenuItem(title: "Notify on Thread Changes",
-      action: #selector(toggleNotifications), keyEquivalent: "")
-    notificationToggle.target = self
-    notificationToggle.state = notificationsEnabled ? .on : .off
-    menu.addItem(notificationToggle)
-    let notifications = NSMenuItem(
-      title: "Notification Permissions…",
-      action: #selector(enableNotifications),
-      keyEquivalent: ""
-    )
-    notifications.target = self
-    menu.addItem(notifications)
     let reconnect = NSMenuItem(title: "Reconnect", action: #selector(reconnect), keyEquivalent: "r")
     reconnect.target = self
     menu.addItem(reconnect)
-    menu.addItem(configureWatcherItem())
+    menu.addItem(configureServiceItem())
     menu.addItem(quitItem())
     statusItem.menu = menu
   }
@@ -354,7 +319,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         string: " ?",
         attributes: [.foregroundColor: NSColor.systemOrange]
       )
-      statusItem.button?.toolTip = "T3 Watcher is disconnected"
+      statusItem.button?.toolTip = "T3 Pets is disconnected"
       return
     }
 
@@ -372,10 +337,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
       append(" ✓", to: title, color: WatcherBadgeKind.finished.color)
     }
     let counts = summary.badges.map { "\($0.kind.label): \($0.count)" }.joined(separator: " · ")
-    statusItem.button?.toolTip = "T3 Watcher · \(counts)"
+    statusItem.button?.toolTip = "T3 Pets · \(counts)"
     if snapshot.watcher == "partial" {
       append(" ?", to: title, color: .systemOrange)
-      statusItem.button?.toolTip = "T3 Watcher · \(counts) · Some backends unavailable"
+      statusItem.button?.toolTip = "T3 Pets · \(counts) · Some backends unavailable"
     }
     statusItem.button?.attributedTitle = title
   }
@@ -417,53 +382,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   }
 
   private func quitItem() -> NSMenuItem {
-    let item = NSMenuItem(title: "Quit T3 Watcher", action: #selector(quit), keyEquivalent: "q")
+    let item = NSMenuItem(title: "Quit T3 Pets", action: #selector(quit), keyEquivalent: "q")
     item.target = self
     return item
   }
 
-  private func configureWatcherItem() -> NSMenuItem {
+  private func configureServiceItem() -> NSMenuItem {
     let item = NSMenuItem(
-      title: "Configure Watcher…",
-      action: #selector(configureWatcher),
+      title: "Configure Connection…",
+      action: #selector(configureService),
       keyEquivalent: ","
     )
     item.target = self
     return item
-  }
-
-  nonisolated private static func requestNotificationPermission() {
-    UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
-  }
-
-  nonisolated func userNotificationCenter(
-    _ center: UNUserNotificationCenter,
-    didReceive response: UNNotificationResponse,
-    withCompletionHandler completionHandler: @escaping () -> Void
-  ) {
-    Task { @MainActor [weak self] in
-      self?.openT3Code()
-    }
-    completionHandler()
-  }
-
-  nonisolated func userNotificationCenter(
-    _ center: UNUserNotificationCenter,
-    willPresent notification: UNNotification,
-    withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
-  ) {
-    completionHandler([.banner, .sound])
-  }
-
-  private func notificationTitle(for status: String) -> String {
-    switch status {
-    case "approval": return "T3 approval needed"
-    case "input": return "T3 thread needs input"
-    case "plan_ready": return "T3 plan is ready"
-    case "failed": return "T3 thread failed"
-    case "limited": return "T3 usage limit reached"
-    default: return "T3 thread finished"
-    }
   }
 
   private func statusLabel(_ status: String) -> String {
@@ -520,16 +451,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     } else {
       statusItem.button?.attributedTitle = NSAttributedString(string: " ?")
       let menu = NSMenu()
-      menu.addItem(disabledItem("T3 Watcher"))
+      menu.addItem(disabledItem("T3 Pets"))
       menu.addItem(
         disabledItem(
-          "Cannot reach \(watcherURL.host ?? watcherURL.absoluteString)",
+          "Cannot reach \(serviceURL.host ?? serviceURL.absoluteString)",
           color: .systemOrange
         )
       )
       menu.addItem(disabledItem(message, color: .systemRed))
       menu.addItem(.separator())
-      menu.addItem(configureWatcherItem())
+      menu.addItem(configureServiceItem())
       menu.addItem(quitItem())
       statusItem.menu = menu
     }
@@ -540,14 +471,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     connect()
   }
 
-  @objc private func configureWatcher() {
+  @objc private func configureService() {
     let alert = NSAlert()
-    alert.messageText = "Connect to T3 Watcher"
-    alert.informativeText = "Enter the URL of the watcher service. It can run on this Mac or on the same machine as your T3 Code backend."
+    alert.messageText = "Connect to T3 Pets"
+    alert.informativeText = "Enter the URL of the T3 Pets service. It can run on this Mac or on the same machine as your T3 Code backend."
     alert.addButton(withTitle: "Connect")
     alert.addButton(withTitle: "Cancel")
 
-    let field = NSTextField(string: watcherURL.absoluteString)
+    let field = NSTextField(string: serviceURL.absoluteString)
     field.placeholderString = "http://127.0.0.1:4173"
     field.frame = NSRect(x: 0, y: 0, width: 420, height: 24)
     alert.accessoryView = field
@@ -560,32 +491,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
       candidate.host != nil
     else {
       let error = NSAlert()
-      error.messageText = "That watcher URL is not valid"
+      error.messageText = "That service URL is not valid"
       error.informativeText = "Use a complete http:// or https:// URL."
       error.runModal()
       return
     }
 
-    watcherURL = candidate
-    UserDefaults.standard.set(candidate.absoluteString, forKey: "watcherURL")
+    serviceURL = candidate
+    UserDefaults.standard.set(candidate.absoluteString, forKey: "serviceURL")
     snapshot = nil
     previousStatuses = [:]
     hasLoadedSnapshot = false
     showConnecting()
     connect()
-  }
-
-  @objc private func enableNotifications() {
-    UNUserNotificationCenter.current().getNotificationSettings(
-      completionHandler: Self.handleNotificationSettings
-    )
-  }
-
-  @objc private func toggleNotifications() {
-    let enabled = !notificationsEnabled
-    UserDefaults.standard.set(enabled, forKey: "threadNotificationsEnabled")
-    if enabled { Self.requestNotificationPermission() }
-    if let snapshot { render(snapshot) }
   }
 
   @objc private func togglePet() {
@@ -603,24 +521,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     guard let width = sender.representedObject as? Double else { return }
     petOverlay.setSize(width: width)
     if let snapshot { render(snapshot) }
-  }
-
-  nonisolated private static func handleNotificationSettings(_ settings: UNNotificationSettings) {
-    switch settings.authorizationStatus {
-    case .notDetermined:
-      requestNotificationPermission()
-    case .denied:
-      Task { @MainActor in openNotificationSettings() }
-    default:
-      break
-    }
-  }
-
-  private static func openNotificationSettings() {
-    guard let url = URL(
-      string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension"
-    ) else { return }
-    NSWorkspace.shared.open(url)
   }
 
   @objc private func openT3Code() {
@@ -657,6 +557,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     NSApplication.shared.terminate(nil)
   }
 }
+
+// Keep pet selection, size, position, and connection settings when upgrading.
+func migrateLegacyPreferences() {
+  let defaults = UserDefaults.standard
+  guard !defaults.bool(forKey: "legacyPreferencesMigrated") else { return }
+  let legacy = defaults.persistentDomain(forName: "com.beck.t3-watcher") ?? [:]
+  for key in ["petOverlayEnabled", "petID", "petWidth", "petOriginX", "petOriginY", "petSizePresetVersion"] {
+    if defaults.object(forKey: key) == nil, let value = legacy[key] {
+      defaults.set(value, forKey: key)
+    }
+  }
+  if defaults.string(forKey: "serviceURL") == nil, let url = legacy["watcherURL"] as? String {
+    defaults.set(url, forKey: "serviceURL")
+  }
+  defaults.set(true, forKey: "legacyPreferencesMigrated")
+}
+
+migrateLegacyPreferences()
 
 let application = NSApplication.shared
 let delegate = AppDelegate()

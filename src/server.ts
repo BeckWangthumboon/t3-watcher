@@ -105,7 +105,7 @@ const server = Bun.serve({
   },
 });
 
-console.log(`T3 Watcher listening on ${server.url}`);
+console.log(`T3 Pets listening on ${server.url}`);
 
 function shutdown(): void {
   for (const poller of pollers) poller.stop();

@@ -12,7 +12,7 @@ import {
 } from "./t3-connection.ts";
 
 test("stores watcher-owned configuration under the user's home directory", () => {
-  expect(DEFAULT_CONFIG_DIR).toBe(join(process.env.HOME!, ".t3-watcher"));
+  expect(DEFAULT_CONFIG_DIR).toBe(join(process.env.HOME!, ".t3-pets"));
   expect(DEFAULT_CONNECTION_FILE).toBe(join(DEFAULT_CONFIG_DIR, "connection.json"));
   expect(DEFAULT_TOKEN_FILE).toBe(join(DEFAULT_CONFIG_DIR, "token"));
 });
@@ -63,7 +63,7 @@ test("exchangeT3PairingUrl requests only orchestration read access", async () =>
   });
   const tokenBody = new URLSearchParams(requests[1]?.init?.body?.toString());
   expect(tokenBody.get("scope")).toBe("orchestration:read");
-  expect(tokenBody.get("client_label")).toBe("T3 Watcher");
+  expect(tokenBody.get("client_label")).toBe("T3 Pets");
 });
 
 test("discoverLocalT3HttpUrl follows T3 Code's runtime state file", async () => {

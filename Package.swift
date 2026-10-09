@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-  name: "T3WatcherApp",
+  name: "T3PetsApp",
   platforms: [.macOS(.v13)],
   targets: [
     .executableTarget(
-      name: "T3WatcherApp",
-      path: "Sources/T3WatcherApp"
+      name: "T3PetsApp",
+      path: "Sources/T3PetsApp"
     )
   ]
 )

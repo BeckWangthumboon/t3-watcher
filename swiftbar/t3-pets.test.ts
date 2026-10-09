@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { findStatusTransitions, parseSseBlocks, renderSwiftBar } from "./t3-watcher.ts";
+import { parseSseBlocks, renderSwiftBar } from "./t3-pets.ts";
 
 const snapshot = {
   watcher: "live" as const,
@@ -49,30 +49,12 @@ describe("renderSwiftBar", () => {
   });
 });
 
-describe("findStatusTransitions", () => {
-  test("suppresses notifications for the initial snapshot", () => {
-    expect(findStatusTransitions(new Map(), snapshot, false)).toEqual([]);
-  });
-
-  test("reports a running to finished transition", () => {
-    const finished = {
-      ...snapshot,
-      threads: [{ ...snapshot.threads[0]!, status: "finished" as const }],
-    };
-    expect(
-      findStatusTransitions(new Map([["environment:running", "running"]]), finished, true),
-    ).toEqual([{ thread: finished.threads[0], previousStatus: "running" }]);
-  });
-
-  test("suppresses first snapshots of newly connected backends and stale cached threads", () => {
-    const finished = { ...snapshot, watcher: "partial" as const, threads: [
-      { ...snapshot.threads[0]!, key: "new-env:thread", status: "finished" as const },
-      { ...snapshot.threads[0]!, status: "finished" as const, backendWatcher: "stale" },
-    ] };
-    expect(findStatusTransitions(new Map([["environment:running", "running"]]), finished, true)).toEqual([]);
-    expect(renderSwiftBar(finished)).toContain("Partly connected");
-    expect(renderSwiftBar(finished)).toContain("Cached · Finished");
-  });
+test("renders partially connected and cached threads", () => {
+  const partial = { ...snapshot, watcher: "partial" as const, threads: [
+    { ...snapshot.threads[0]!, status: "finished" as const, backendWatcher: "stale" },
+  ] };
+  expect(renderSwiftBar(partial)).toContain("Partly connected");
+  expect(renderSwiftBar(partial)).toContain("Cached · Finished");
 });
 
 test("parseSseBlocks preserves incomplete data", () => {

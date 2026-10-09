@@ -1,5 +1,5 @@
 import {
-  DEFAULT_CONFIG_DIR,
+  resolveConfigDirectory,
   LEGACY_TOKEN_FILE,
   discoverLocalT3HttpUrl,
   readSavedT3Connection,
@@ -55,17 +55,18 @@ async function readToken(configDir: string): Promise<string | null> {
 }
 
 export async function loadConfig(): Promise<WatcherConfig> {
-  const settleValue = Bun.env.WATCHER_AUTO_SETTLE_DAYS?.trim() ?? "3";
+  const settleValue = (Bun.env.T3_PETS_AUTO_SETTLE_DAYS ?? Bun.env.WATCHER_AUTO_SETTLE_DAYS)?.trim() ?? "3";
   const autoSettleAfterDays = settleValue === "never" ? null : Number(settleValue);
   if (autoSettleAfterDays !== null && (!Number.isFinite(autoSettleAfterDays) || autoSettleAfterDays < 0)) {
-    throw new Error("WATCHER_AUTO_SETTLE_DAYS must be a non-negative number or 'never'.");
+    throw new Error("T3_PETS_AUTO_SETTLE_DAYS must be a non-negative number or 'never'.");
   }
   const explicitUrl = Bun.env.T3_HTTP_URL?.trim();
-  const configDir = Bun.env.WATCHER_CONFIG_DIR?.trim() || DEFAULT_CONFIG_DIR;
+  const configDir = await resolveConfigDirectory();
   const connectionFile = Bun.env.T3_CONNECTION_FILE?.trim() || undefined;
   const savedConnection = explicitUrl ? null : await readSavedT3Connection(
-    connectionFile ?? (configDir === DEFAULT_CONFIG_DIR ? undefined : join(configDir, "connection.json")),
-  );
+    connectionFile ?? join(configDir, "connection.json"),
+  ) ?? (connectionFile || Bun.env.T3_PETS_CONFIG_DIR?.trim() || Bun.env.WATCHER_CONFIG_DIR?.trim()
+    ? null : await readSavedT3Connection());
   const named = explicitUrl || connectionFile ? [] : await readNamedT3Connections(configDir);
   const useDefault = Boolean(explicitUrl || connectionFile || savedConnection || named.length === 0);
   const discoveredUrl =
@@ -83,13 +84,13 @@ export async function loadConfig(): Promise<WatcherConfig> {
       "http://127.0.0.1:3773"
     ).replace(/\/$/, ""),
     bearerToken: useDefault ? await readToken(configDir) : null,
-    watcherName: Bun.env.WATCHER_NAME?.trim() || savedConnection?.label || null,
-    pollMs: positiveInteger(Bun.env.WATCHER_POLL_MS, 2_000),
+    watcherName: (Bun.env.T3_PETS_NAME ?? Bun.env.WATCHER_NAME)?.trim() || savedConnection?.label || null,
+    pollMs: positiveInteger((Bun.env.T3_PETS_POLL_MS ?? Bun.env.WATCHER_POLL_MS), 2_000),
     autoSettleAfterDays,
-    hostname: Bun.env.WATCHER_HOST?.trim() || "127.0.0.1",
+    hostname: (Bun.env.T3_PETS_HOST ?? Bun.env.WATCHER_HOST)?.trim() || "127.0.0.1",
     port: positiveInteger(Bun.env.PORT, 4_173),
     webBaseUrl: Bun.env.T3_WEB_URL?.trim() || null,
-    demo: Bun.env.WATCHER_DEMO === "1",
+    demo: (Bun.env.T3_PETS_DEMO ?? Bun.env.WATCHER_DEMO) === "1",
   };
   const backends: T3BackendConfig[] = [];
   if (useDefault) {

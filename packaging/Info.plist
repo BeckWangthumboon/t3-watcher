@@ -5,21 +5,21 @@
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleExecutable</key>
-  <string>T3 Watcher</string>
+  <string>T3 Pets</string>
   <key>CFBundleIdentifier</key>
-  <string>com.beck.t3-watcher</string>
+  <string>com.beck.t3-pets</string>
   <key>CFBundleIconFile</key>
-  <string>T3Watcher</string>
+  <string>T3Pets</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>T3 Watcher</string>
+  <string>T3 Pets</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.1</string>
+  <string>0.2.0</string>
   <key>CFBundleVersion</key>
-  <string>2</string>
+  <string>3</string>
   <key>LSMinimumSystemVersion</key>
   <string>13.0</string>
   <key>LSUIElement</key>
@@ -30,8 +30,8 @@
     <true/>
   </dict>
   <key>NSHumanReadableCopyright</key>
-  <string>T3 Watcher contributors</string>
-  <key>T3WatcherURL</key>
+  <string>T3 Pets contributors</string>
+  <key>T3PetsURL</key>
   <string>http://127.0.0.1:4173</string>
 </dict>
 </plist>

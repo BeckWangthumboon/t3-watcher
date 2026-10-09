@@ -1,5 +1,5 @@
 import {
-  DEFAULT_CONFIG_DIR,
+  resolveConfigDirectory,
   exchangeT3PairingUrl,
   saveT3Connection,
   namedBackendDirectory,
@@ -12,7 +12,7 @@ if (args[0] === "--name") {
   args.splice(0, 2);
   if (!name) throw new Error("--name requires a backend name.");
 }
-const configDir = Bun.env.WATCHER_CONFIG_DIR?.trim() || DEFAULT_CONFIG_DIR;
+const configDir = await resolveConfigDirectory();
 const directory = name ? namedBackendDirectory(name, configDir) : configDir;
 const pairingUrl = args[0]?.trim();
 if (!pairingUrl) {
@@ -25,6 +25,6 @@ if (args.length !== 1) throw new Error("Expected exactly one T3 pairing URL.");
 const connection = await exchangeT3PairingUrl(pairingUrl);
 await saveT3Connection(connection, directory);
 
-console.log(`Connected T3 Watcher to ${connection.label} (${connection.t3HttpUrl}).`);
+console.log(`Connected T3 Pets to ${connection.label} (${connection.t3HttpUrl}).`);
 console.log(`Saved connection details under ${directory} with owner-only permissions.`);
-console.log("Restart the watcher service to load the saved connection.");
+console.log("Restart the T3 Pets service to load the saved connection.");

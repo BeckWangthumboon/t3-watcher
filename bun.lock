@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "t3-watcher",
+      "name": "t3-pets",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "latest",
