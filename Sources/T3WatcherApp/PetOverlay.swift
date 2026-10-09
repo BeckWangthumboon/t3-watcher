@@ -81,11 +81,10 @@ enum PetAnimationState {
 private final class PetBadgeView: NSView {
   var count = 0 {
     didSet {
-      isHidden = count == 0
       needsDisplay = true
     }
   }
-  var kind = WatcherBadgeKind.hidden {
+  var kind = WatcherBadgeKind.attention {
     didSet { needsDisplay = true }
   }
   var showsLabel = false {
@@ -107,14 +106,8 @@ private final class PetBadgeView: NSView {
 
   override func draw(_ dirtyRect: NSRect) {
     super.draw(dirtyRect)
-    guard count > 0 else { return }
-    let color: NSColor = switch kind {
-    case .attention: .systemOrange
-    case .working: NSColor(calibratedRed: 0.90, green: 0.37, blue: 0.37, alpha: 1)
-    case .finished: NSColor(calibratedRed: 0.20, green: 0.83, blue: 0.48, alpha: 1)
-    case .hidden: .clear
-    }
-    color.setFill()
+    guard count > 0 || showsLabel else { return }
+    kind.color.setFill()
     NSBezierPath(
       roundedRect: bounds,
       xRadius: bounds.height / 2,
@@ -123,8 +116,8 @@ private final class PetBadgeView: NSView {
 
     guard showsLabel else { return }
 
-    let displayText = kind == .attention ? "!" : String(count)
-    let fontSize = bounds.width * (displayText.count < 3 ? 0.52 : 0.4)
+    let displayText = String(count)
+    let fontSize = min(bounds.width * 0.52, (bounds.width - 6) / CGFloat(displayText.count) * 1.5)
     let text = displayText as NSString
     let attributes: [NSAttributedString.Key: Any] = [
       .font: NSFont.systemFont(ofSize: fontSize, weight: .semibold),
@@ -143,17 +136,16 @@ private final class PetBadgeView: NSView {
 
 private final class PetSpriteView: NSImageView {
   private static let cellSize = NSSize(width: 192, height: 208)
-  private static let badgeGutterRatio: CGFloat = 0.2
+  private static let badgeGutterRatio: CGFloat = 0.3
   static func overlayHeight(for width: CGFloat) -> CGFloat {
     width * cellSize.height / cellSize.width + width * badgeGutterRatio
   }
   var onClose: (() -> Void)?
-  private let badgeView = PetBadgeView(frame: .zero)
+  private let badgeViews = (0..<3).map { _ in PetBadgeView(frame: .zero) }
   private var spritesheet: CGImage?
   private var state = PetAnimationState.idle
   private var baselineState = PetAnimationState.idle
   private var isPlayingTransition = false
-  private var hoverCyclesRemaining = 0
   private var frameIndex = 0
   private var animationTimer: Timer?
   private var dragStart: (mouse: NSPoint, origin: NSPoint)?
@@ -168,8 +160,7 @@ private final class PetSpriteView: NSImageView {
     wantsLayer = true
     layer?.magnificationFilter = .nearest
     layer?.minificationFilter = .nearest
-    addSubview(badgeView)
-    badgeView.frame = badgeFrame(expanded: false)
+    badgeViews.forEach { addSubview($0) }
   }
 
   required init?(coder: NSCoder) {
@@ -200,57 +191,67 @@ private final class PetSpriteView: NSImageView {
 
   override func mouseEntered(with event: NSEvent) {
     setBadgeExpanded(true)
-    guard !isPlayingTransition else { return }
-    hoverCyclesRemaining = 3
-    beginAnimation(.jumping)
+    guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+    let pulse = CAKeyframeAnimation(keyPath: "transform.scale")
+    pulse.values = [1, 1.012, 1]
+    pulse.keyTimes = [0, 0.45, 1]
+    pulse.duration = 0.24
+    pulse.timingFunctions = [
+      CAMediaTimingFunction(name: .easeOut),
+      CAMediaTimingFunction(name: .easeInEaseOut),
+    ]
+    layer?.add(pulse, forKey: "hoverPulse")
   }
 
   override func mouseExited(with event: NSEvent) {
     setBadgeExpanded(false)
-    hoverCyclesRemaining = 0
-    guard !isPlayingTransition else { return }
-    beginAnimation(baselineState)
+    layer?.removeAnimation(forKey: "hoverPulse")
   }
 
   override func layout() {
     super.layout()
-    badgeView.frame = badgeFrame(expanded: isHovering)
+    layoutBadges(animated: false)
   }
 
-  private func badgeFrame(expanded: Bool) -> NSRect {
-    if expanded {
-      let diameter = min(32, max(20, bounds.width * 0.3))
-      return NSRect(
-        x: bounds.maxX - diameter - 1,
-        y: bounds.minY,
-        width: diameter,
-        height: diameter
-      )
-    }
-
-    let width = min(44, max(20, bounds.width * 0.32))
-    let height = min(10, max(6, bounds.width * 0.075))
+  private func layoutBadges(animated: Bool) {
+    let visibleBadges = badgeViews.filter { isHovering || $0.count > 0 }
+    let gap: CGFloat = isHovering ? 3 : 2
+    let height = isHovering
+      ? min(28, max(18, bounds.width * 0.25))
+      : min(10, max(6, bounds.width * 0.075))
+    let totalWidth = isHovering
+      ? CGFloat(visibleBadges.count) * height + CGFloat(max(0, visibleBadges.count - 1)) * gap
+      : min(44, max(20, bounds.width * 0.32))
+    let width = (totalWidth - CGFloat(max(0, visibleBadges.count - 1)) * gap)
+      / CGFloat(max(1, visibleBadges.count))
     let gutterHeight = bounds.width * Self.badgeGutterRatio
-    return NSRect(
-      x: bounds.midX - width / 2,
-      y: bounds.minY + max(0, gutterHeight - height - 2),
-      width: width,
-      height: height
-    )
+    for badge in badgeViews {
+      badge.isHidden = !isHovering && badge.count == 0
+      badge.showsLabel = isHovering
+    }
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0.16 : 0
+      context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+      for (index, badge) in visibleBadges.enumerated() {
+        let frame = NSRect(
+          x: bounds.midX - totalWidth / 2 + CGFloat(index) * (width + gap),
+          y: bounds.minY + max(0, (gutterHeight - height) / 2),
+          width: width,
+          height: height
+        )
+        if animated {
+          badge.animator().frame = frame
+        } else {
+          badge.frame = frame
+        }
+      }
+    }
   }
 
   private func setBadgeExpanded(_ expanded: Bool) {
     guard expanded != isHovering else { return }
     isHovering = expanded
-    if !expanded { badgeView.showsLabel = false }
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0.2
-      context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-      badgeView.animator().frame = badgeFrame(expanded: expanded)
-    } completionHandler: { [weak self] in
-      guard let self, self.isHovering else { return }
-      self.badgeView.showsLabel = true
-    }
+    layoutBadges(animated: true)
   }
 
   override func mouseDown(with event: NSEvent) {
@@ -295,13 +296,12 @@ private final class PetSpriteView: NSImageView {
 
   func setBaselineState(_ next: PetAnimationState) {
     baselineState = next
-    guard !isPlayingTransition, hoverCyclesRemaining == 0, !isHovering, next != state else { return }
+    guard !isPlayingTransition, next != state else { return }
     beginAnimation(next)
   }
 
   func playTransition(_ next: PetAnimationState) {
     isPlayingTransition = true
-    hoverCyclesRemaining = 0
     beginAnimation(next)
   }
 
@@ -312,9 +312,14 @@ private final class PetSpriteView: NSImageView {
     scheduleNextFrame()
   }
 
-  func setBadge(count: Int, kind: WatcherBadgeKind) {
-    badgeView.kind = kind
-    badgeView.count = count
+  func setBadges(_ badges: [(count: Int, kind: WatcherBadgeKind)]) {
+    for (view, badge) in zip(badgeViews, badges) {
+      view.kind = badge.kind
+      view.count = badge.count
+      view.toolTip = "\(badge.kind.label): \(badge.count)"
+    }
+    toolTip = badges.map { "\($0.kind.label): \($0.count)" }.joined(separator: " · ")
+    layoutBadges(animated: false)
   }
 
   private func scheduleNextFrame() {
@@ -328,12 +333,7 @@ private final class PetSpriteView: NSImageView {
         let nextFrame = self.frameIndex + 1
         if self.isPlayingTransition, nextFrame >= durations.count {
           self.isPlayingTransition = false
-          self.beginAnimation(self.isHovering ? .idle : self.baselineState)
-          return
-        }
-        if self.hoverCyclesRemaining > 0, nextFrame >= durations.count {
-          self.hoverCyclesRemaining -= 1
-          self.beginAnimation(self.hoverCyclesRemaining > 0 ? .jumping : .idle)
+          self.beginAnimation(self.baselineState)
           return
         }
         self.frameIndex = nextFrame % durations.count
@@ -459,7 +459,7 @@ final class PetOverlayController: NSObject, NSWindowDelegate {
   }
 
   func update(summary: WatcherSummary, transition: PetAnimationState?) {
-    spriteView.setBadge(count: summary.badge.count, kind: summary.badge.kind)
+    spriteView.setBadges(summary.badges)
     spriteView.setBaselineState(summary.baselinePetState)
     if let transition { spriteView.playTransition(transition) }
   }

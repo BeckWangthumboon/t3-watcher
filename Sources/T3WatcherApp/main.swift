@@ -38,7 +38,22 @@ enum WatcherBadgeKind {
   case attention
   case working
   case finished
-  case hidden
+
+  var color: NSColor {
+    switch self {
+    case .attention: return .systemOrange
+    case .working: return NSColor(calibratedRed: 0.90, green: 0.37, blue: 0.37, alpha: 1)
+    case .finished: return NSColor(calibratedRed: 0.20, green: 0.83, blue: 0.48, alpha: 1)
+    }
+  }
+
+  var label: String {
+    switch self {
+    case .attention: return "Needs you"
+    case .working: return "Working"
+    case .finished: return "Finished"
+    }
+  }
 }
 
 struct WatcherSummary {
@@ -53,17 +68,12 @@ struct WatcherSummary {
     workingThreads.isEmpty ? .idle : .running
   }
 
-  var badge: (count: Int, kind: WatcherBadgeKind) {
-    if !attentionThreads.isEmpty {
-      return (attentionThreads.count, .attention)
-    }
-    if !workingThreads.isEmpty {
-      return (workingThreads.count, .working)
-    }
-    if !finishedThreads.isEmpty {
-      return (finishedThreads.count, .finished)
-    }
-    return (0, .hidden)
+  var badges: [(count: Int, kind: WatcherBadgeKind)] {
+    [
+      (attentionThreads.count, .attention),
+      (workingThreads.count, .working),
+      (finishedThreads.count, .finished),
+    ]
   }
 
   func transitionAnimation(from previousStatuses: [String: String]) -> PetAnimationState? {
@@ -351,22 +361,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     let attention = summary.attentionThreads.count
     let running = summary.workingThreads.count
     let title = NSMutableAttributedString()
+    statusItem.button?.image = WatcherMark.image()
     if attention > 0 {
-      statusItem.button?.image = WatcherMark.image()
-      append(" !\(attention)", to: title, color: .systemOrange)
-      statusItem.button?.toolTip = "T3 Watcher: \(attention) thread\(attention == 1 ? "" : "s") need attention"
-    } else if running > 0 {
-      statusItem.button?.image = WatcherMark.image()
-      append(" ●", to: title, color: .systemBlue)
-      statusItem.button?.toolTip = "T3 Watcher: work is moving"
-    } else {
-      statusItem.button?.image = WatcherMark.image()
-      append(" ✓", to: title, color: .systemGreen)
-      statusItem.button?.toolTip = "T3 Watcher: all clear"
+      append(" !\(attention)", to: title, color: WatcherBadgeKind.attention.color)
     }
+    if running > 0 {
+      append(" ●\(running)", to: title, color: WatcherBadgeKind.working.color)
+    }
+    if attention == 0, running == 0 {
+      append(" ✓", to: title, color: WatcherBadgeKind.finished.color)
+    }
+    let counts = summary.badges.map { "\($0.kind.label): \($0.count)" }.joined(separator: " · ")
+    statusItem.button?.toolTip = "T3 Watcher · \(counts)"
     if snapshot.watcher == "partial" {
       append(" ?", to: title, color: .systemOrange)
-      statusItem.button?.toolTip = "T3 Watcher: some backends are unavailable"
+      statusItem.button?.toolTip = "T3 Watcher · \(counts) · Some backends unavailable"
     }
     statusItem.button?.attributedTitle = title
   }
@@ -506,6 +515,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         threads: snapshot.threads,
         backends: snapshot.backends
       )
+      petOverlay.update(summary: WatcherSummary(snapshot: stale), transition: nil)
       render(stale)
     } else {
       statusItem.button?.attributedTitle = NSAttributedString(string: " ?")

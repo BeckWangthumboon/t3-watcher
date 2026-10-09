@@ -140,12 +140,12 @@ Copy `.env.example` to `.env` or set environment variables in the service manage
 
 Click the eye in the menu bar to see every unsettled thread and its state. The counts mean:
 
-- `!` — needs attention: approval, input, plan ready, failure, or usage limit;
-- `●` — starting or working;
+- orange `!` with count — needs attention: approval, input, plan ready, failure, or usage limit;
+- red `●` with count — starting or working;
 - green `✓` — no active or attention-requiring work;
 - `?` — the app cannot reach the watcher service, or one or more T3 backends are unavailable.
 
-The pet overlay reacts to the same lifecycle data. Drag it to move it, use **Pet Size** for a preset, and right-click it to hide it. Pets are loaded from `~/.codex/pets`. To copy Codex's built-in companion into that directory, run:
+The pet overlay reacts to the same lifecycle data. Its small bar shows active orange (needs you), red (working), and green (finished) segments together. Hover for separate indicators with each exact count, including zero, and a tiny, quick pulse. Drag it to move it, use **Pet Size** for a preset, and right-click it to hide it. Pets are loaded from `~/.codex/pets`. To copy Codex's built-in companion into that directory, run:
 
 ```sh
 ./scripts/install-codex-pet-asset.sh
